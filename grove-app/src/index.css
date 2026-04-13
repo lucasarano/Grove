@@ -1,0 +1,237 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Design System Tokens ─────────────────────────────────────────── */
+:root {
+  /* Backgrounds */
+  --color-bg:         #F4F1EC;
+  --color-bg-alt:     #EDEAE3;
+  --color-surface:    #FFFFFF;
+
+  /* Text */
+  --color-text-primary:   #1A1A18;
+  --color-text-secondary: #6B6860;
+  --color-text-tertiary:  #A8A49C;
+
+  /* Accent */
+  --color-accent:     #3D5A47;
+  --color-accent-dim: #6B8C74;
+
+  /* Borders */
+  --color-border:        #D8D4CC;
+  --color-border-strong: #B0AB9F;
+
+  /* Status */
+  --color-error:   #8B3A3A;
+  --color-success: #3D5A47;
+
+  /* Fonts */
+  --font-display: 'DM Serif Display', Georgia, serif;
+  --font-body:    'DM Sans', system-ui, sans-serif;
+
+  /* Spacing (8px grid) */
+  --space-1:  0.5rem;
+  --space-2:  1rem;
+  --space-3:  1.5rem;
+  --space-4:  2rem;
+  --space-6:  3rem;
+  --space-8:  4rem;
+  --space-12: 6rem;
+  --space-16: 8rem;
+  --space-24: 12rem;
+}
+
+/* ─── Base Reset ────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-body);
+  font-weight: 300;
+  font-size: 1.0625rem;
+  line-height: 1.7;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Typography ────────────────────────────────────────────────────── */
+h1, h2, h3 {
+  font-family: var(--font-display);
+  font-weight: 400;
+}
+
+/* ─── Buttons ───────────────────────────────────────────────────────── */
+.btn-primary {
+  background: var(--color-accent);
+  color: #FFFFFF;
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 0.875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.875rem 2rem;
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+  transition: background 0.2s ease, opacity 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.btn-primary:hover { background: var(--color-accent-dim); }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-strong);
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 0.875rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.875rem 2rem;
+  border-radius: 0;
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.btn-ghost:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.btn-icon {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.375rem;
+  color: var(--color-text-secondary);
+  transition: color 0.15s ease, opacity 0.15s ease;
+  border-radius: 0;
+}
+.btn-icon:hover { color: var(--color-text-primary); }
+
+/* ─── Cards ─────────────────────────────────────────────────────────── */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  padding: var(--space-6);
+}
+
+/* ─── Reveal animation ──────────────────────────────────────────────── */
+.reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 0.5s ease-out, transform 0.5s ease-out;
+}
+.reveal.visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* ─── Scrollbar ─────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-border-strong); }
+
+/* ─── Chat scroll performance ───────────────────────────────────────── */
+/* The react-window List renders rows as position:absolute + translateY.
+   Promoting the list container to its own compositing layer keeps scroll
+   on the GPU thread and prevents repaints from leaking to the rest of
+   the page. */
+[role="list"] {
+  -webkit-overflow-scrolling: touch;
+}
+/* Rows are already transformed; hint the browser to keep them composited */
+[role="listitem"] {
+  will-change: transform;
+}
+
+/* ─── Prose / Markdown ──────────────────────────────────────────────── */
+.prose {
+  font-family: var(--font-body);
+  font-weight: 300;
+  font-size: 1.0625rem;
+  line-height: 1.7;
+  color: var(--color-text-primary);
+}
+.prose p { margin-bottom: 0.875rem; }
+.prose p:last-child { margin-bottom: 0; }
+.prose code {
+  font-family: 'Menlo', 'Monaco', monospace;
+  font-size: 0.875em;
+  background: var(--color-bg-alt);
+  padding: 0.125em 0.35em;
+  border-radius: 2px;
+  border: 1px solid var(--color-border);
+}
+.prose pre {
+  background: var(--color-text-primary);
+  color: var(--color-bg);
+  padding: var(--space-3);
+  overflow-x: auto;
+  margin: var(--space-2) 0;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+.prose pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+.prose ul, .prose ol {
+  padding-left: 1.5rem;
+  margin-bottom: 0.875rem;
+}
+.prose li { margin-bottom: 0.25rem; }
+.prose h1, .prose h2, .prose h3 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.1;
+}
+.prose blockquote {
+  border-left: 2px solid var(--color-accent);
+  padding-left: var(--space-3);
+  color: var(--color-text-secondary);
+  font-style: italic;
+  margin: var(--space-2) 0;
+}
+.prose strong { font-weight: 500; }
+.prose a { color: var(--color-accent); text-decoration: underline; text-underline-offset: 3px; }
+.prose hr { border: none; border-top: 1px solid var(--color-border); margin: var(--space-4) 0; }
+
+/* ─── Streaming cursor ──────────────────────────────────────────────── */
+.streaming-cursor::after {
+  content: '▋';
+  animation: blink 0.9s step-end infinite;
+  color: var(--color-accent);
+  font-size: 0.9em;
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}

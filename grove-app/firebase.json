@@ -1,0 +1,17 @@
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "auth": {
+    "providers": {
+      "anonymous": false,
+      "emailPassword": true,
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "Grove",
+        "supportEmail": "support@grove.app",
+        "authorizedRedirectUris": ["http://localhost:5173"]
+      }
+    }
+  }
+}
