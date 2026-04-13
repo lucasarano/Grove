@@ -6,6 +6,8 @@ import ChatPanel from './components/ChatPanel/ChatPanel';
 import TreePanel from './components/TreePanel/TreePanel';
 import ApiKeyModal from './components/ApiKeyModal';
 import AuthModal from './components/AuthModal';
+import UpgradeModal from './components/UpgradeModal';
+import PremiumManageModal from './components/PremiumManageModal';
 import ConversationSidebar from './components/ConversationSidebar';
 
 const MIN_TREE_PX = 200;
@@ -118,12 +120,84 @@ function MainLayout() {
   );
 }
 
+function CheckoutBanner({ status, onDismiss }) {
+  if (!status) return null;
+  const isSuccess = status === 'success';
+  return (
+    <div style={{
+      position: 'fixed',
+      bottom: '1.5rem',
+      left: '50%',
+      transform: 'translateX(-50%)',
+      zIndex: 600,
+      background: isSuccess ? 'var(--color-accent)' : 'var(--color-surface)',
+      border: `1px solid ${isSuccess ? 'var(--color-accent)' : 'var(--color-border-strong)'}`,
+      color: isSuccess ? '#fff' : 'var(--color-text-primary)',
+      padding: '0.75rem 1.25rem',
+      boxShadow: '0 4px 20px rgba(26,26,24,0.16)',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.875rem',
+      maxWidth: '420px',
+      width: '90vw',
+      fontFamily: 'var(--font-body)',
+      fontSize: '0.9375rem',
+      fontWeight: 300,
+      animation: 'bannerIn 0.3s ease-out',
+    }}>
+      <span style={{ flex: 1, lineHeight: 1.4 }}>
+        {isSuccess
+          ? '🎉 Welcome to Premium! All models are now unlocked.'
+          : 'Checkout cancelled — you can upgrade anytime.'}
+      </span>
+      <button
+        onClick={onDismiss}
+        style={{
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          color: isSuccess ? 'rgba(255,255,255,0.7)' : 'var(--color-text-tertiary)',
+          fontFamily: 'var(--font-body)',
+          fontSize: '1rem',
+          lineHeight: 1,
+          padding: '0.125rem',
+          flexShrink: 0,
+        }}
+      >
+        ×
+      </button>
+      <style>{`
+        @keyframes bannerIn {
+          from { opacity: 0; transform: translateX(-50%) translateY(12px); }
+          to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 function AppInner() {
   const { user, loading, isAtTokenLimit, addTokenUsage } = useAuth();
-  const [apiKeyOpen,   setApiKeyOpen]   = useState(false);
-  const [authOpen,     setAuthOpen]     = useState(false);
+  const [apiKeyOpen,    setApiKeyOpen]    = useState(false);
+  const [authOpen,      setAuthOpen]      = useState(false);
   const [authModalMode, setAuthModalMode] = useState('signup');
-  const [sidebarOpen,  setSidebarOpen]  = useState(false);
+  const [upgradeOpen,   setUpgradeOpen]   = useState(false);
+  const [premiumManageOpen, setPremiumManageOpen] = useState(false);
+  const [sidebarOpen,   setSidebarOpen]   = useState(false);
+  const [checkoutStatus, setCheckoutStatus] = useState(null); // 'success' | 'cancel' | null
+
+  // Handle ?checkout=success / ?checkout=cancel from Stripe redirect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('checkout');
+    if (status === 'success' || status === 'cancel') {
+      setCheckoutStatus(status);
+      // Clean the URL param without a full page reload
+      const url = new URL(window.location.href);
+      url.searchParams.delete('checkout');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, []);
 
   const openAuthModal = useCallback((mode) => {
     setAuthModalMode(mode);
@@ -146,10 +220,15 @@ function AppInner() {
           onShowApiKey={() => setApiKeyOpen(true)}
           onShowAuth={() => openAuthModal('signin')}
           onToggleSidebar={() => setSidebarOpen((o) => !o)}
+          onShowUpgrade={() => setUpgradeOpen(true)}
+          onShowPremiumManage={() => setPremiumManageOpen(true)}
         />
         <MainLayout />
         <ApiKeyModal open={apiKeyOpen} onClose={() => setApiKeyOpen(false)} />
         <AuthModal open={authOpen} defaultMode={authModalMode} onClose={() => setAuthOpen(false)} />
+        <UpgradeModal open={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
+        <PremiumManageModal open={premiumManageOpen} onClose={() => setPremiumManageOpen(false)} />
+        <CheckoutBanner status={checkoutStatus} onDismiss={() => setCheckoutStatus(null)} />
       </div>
     </ConversationProvider>
   );

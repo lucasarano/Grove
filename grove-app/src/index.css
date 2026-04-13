@@ -224,6 +224,23 @@ h1, h2, h3 {
 .prose a { color: var(--color-accent); text-decoration: underline; text-underline-offset: 3px; }
 .prose hr { border: none; border-top: 1px solid var(--color-border); margin: var(--space-4) 0; }
 
+/* ─── KaTeX / Math ──────────────────────────────────────────────────── */
+.prose .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+  margin: 1rem 0;
+}
+.prose .katex-display > .katex {
+  display: block;
+  text-align: center;
+  font-size: 1.1em;
+}
+.prose .katex {
+  font-size: 1em;
+  color: var(--color-text-primary);
+}
+
 /* ─── Streaming cursor ──────────────────────────────────────────────── */
 .streaming-cursor::after {
   content: '▋';

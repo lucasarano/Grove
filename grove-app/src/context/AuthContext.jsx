@@ -4,22 +4,52 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   signOut,
   updateProfile,
 } from 'firebase/auth';
-import { doc, setDoc, getDoc, onSnapshot, serverTimestamp, updateDoc, increment } from 'firebase/firestore';
+import {
+  doc,
+  setDoc,
+  getDoc,
+  onSnapshot,
+  serverTimestamp,
+  updateDoc,
+  runTransaction,
+} from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 
 const AuthContext = createContext(null);
 
 const googleProvider = new GoogleAuthProvider();
 
-export const TOKEN_LIMIT = 30_000;
+/** Grove-credit tokens per calendar month (tiered by subscription) */
+export const FREE_TOKEN_LIMIT = 30_000;
+export const PREMIUM_TOKEN_LIMIT = 400_000;
+
+export function groveCreditTokenLimit(isPremium) {
+  return isPremium ? PREMIUM_TOKEN_LIMIT : FREE_TOKEN_LIMIT;
+}
+
+/** `YYYY-MM` for the calendar month that `tokensUsed` applies to */
+export function calendarMonthKey(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/** Shown when a user hits the monthly cap (local calendar, first day of next month). */
+export function formatTokenLimitResetHint() {
+  const d = new Date();
+  const next = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+  const when = next.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
+  return `Your limit resets next month (${when}).`;
+}
 
 async function ensureUserDoc(user) {
   const ref = doc(db, 'users', user.uid);
   const snap = await getDoc(ref);
+  const month = calendarMonthKey();
   if (!snap.exists()) {
     await setDoc(ref, {
       uid:         user.uid,
@@ -28,10 +58,14 @@ async function ensureUserDoc(user) {
       createdAt:   serverTimestamp(),
       credits:     { haiku: 50, sonnet: 20, gptMini: 20 },
       tokensUsed:  0,
+      tokenUsageMonth: month,
     });
-  } else if (snap.data().tokensUsed === undefined) {
-    // Backfill tokensUsed for existing accounts that predate this field
-    await updateDoc(ref, { tokensUsed: 0 });
+  } else {
+    const data = snap.data();
+    const patch = {};
+    if (data.tokensUsed === undefined) patch.tokensUsed = 0;
+    if (data.tokenUsageMonth === undefined) patch.tokenUsageMonth = month;
+    if (Object.keys(patch).length) await updateDoc(ref, patch);
   }
 }
 
@@ -39,18 +73,36 @@ export function AuthProvider({ children }) {
   const [user,       setUser]       = useState(undefined); // undefined = loading
   const [loading,    setLoading]    = useState(true);
   const [tokensUsed, setTokensUsed] = useState(0);
+  const [isPremium,  setIsPremium]  = useState(false);
   const unsubDocRef = useRef(null);
+
+  useEffect(() => {
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (result?.user) await ensureUserDoc(result.user);
+      })
+      .catch((err) => {
+        if (import.meta.env.DEV) console.warn('[auth] getRedirectResult', err);
+      });
+  }, []);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         await ensureUserDoc(firebaseUser);
 
-        // Subscribe to user doc for real-time tokensUsed updates
+        // Subscribe to user doc for real-time field updates
         const ref = doc(db, 'users', firebaseUser.uid);
         unsubDocRef.current = onSnapshot(ref, (snap) => {
           if (snap.exists()) {
-            setTokensUsed(snap.data().tokensUsed ?? 0);
+            const data = snap.data();
+            const month = calendarMonthKey();
+            const storedMonth = data.tokenUsageMonth;
+            const raw = data.tokensUsed ?? 0;
+            const inCurrentMonth =
+              storedMonth === undefined ? true : storedMonth === month;
+            setTokensUsed(inCurrentMonth ? raw : 0);
+            setIsPremium(data.isPremium === true);
           }
         });
       } else {
@@ -60,6 +112,7 @@ export function AuthProvider({ children }) {
           unsubDocRef.current = null;
         }
         setTokensUsed(0);
+        setIsPremium(false);
       }
       setUser(firebaseUser ?? null);
       setLoading(false);
@@ -85,9 +138,17 @@ export function AuthProvider({ children }) {
   }, []);
 
   const signInWithGoogle = useCallback(async () => {
-    const result = await signInWithPopup(auth, googleProvider);
-    await ensureUserDoc(result.user);
-    return result.user;
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      await ensureUserDoc(result.user);
+      return { user: result.user };
+    } catch (e) {
+      if (e?.code === 'auth/popup-blocked') {
+        await signInWithRedirect(auth, googleProvider);
+        return { redirected: true };
+      }
+      throw e;
+    }
   }, []);
 
   const logout = useCallback(() => signOut(auth), []);
@@ -95,17 +156,33 @@ export function AuthProvider({ children }) {
   const addTokenUsage = useCallback(async (count) => {
     if (!auth.currentUser || !count) return;
     const ref = doc(db, 'users', auth.currentUser.uid);
-    await updateDoc(ref, { tokensUsed: increment(count) });
+    const monthKey = calendarMonthKey();
+    await runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(ref);
+      if (!snap.exists()) return;
+      const d = snap.data();
+      const storedMonth = d.tokenUsageMonth;
+      const prev = d.tokensUsed ?? 0;
+      if (storedMonth !== monthKey) {
+        const carry = storedMonth === undefined ? prev : 0;
+        transaction.update(ref, { tokenUsageMonth: monthKey, tokensUsed: carry + count });
+      } else {
+        transaction.update(ref, { tokensUsed: prev + count });
+      }
+    });
   }, []);
+
+  const tokenLimit = groveCreditTokenLimit(isPremium);
 
   const value = {
     user,
     loading,
     isLoggedIn: !!user,
     tokensUsed,
-    tokensRemaining: Math.max(0, TOKEN_LIMIT - tokensUsed),
-    isAtTokenLimit: tokensUsed >= TOKEN_LIMIT,
-    TOKEN_LIMIT,
+    tokensRemaining: Math.max(0, tokenLimit - tokensUsed),
+    isAtTokenLimit: tokensUsed >= tokenLimit,
+    isPremium,
+    tokenLimit,
     addTokenUsage,
     signUpWithEmail,
     signInWithEmail,

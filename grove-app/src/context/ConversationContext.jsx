@@ -5,13 +5,15 @@ import { streamOpenAIMessage } from '../services/openai';
 import { splitTopicFromContent } from '../lib/topicMetadata';
 import {
   readStoredProviderKeys,
+  readKeyMode,
+  saveKeyMode,
   effectiveAnthropicKey,
   effectiveOpenaiKey,
   hasAnthropicAccess,
   hasOpenaiAccess,
 } from '../lib/providerKeys';
 import { db } from '../lib/firebase';
-import { TOKEN_LIMIT } from './AuthContext';
+import { useAuth, formatTokenLimitResetHint } from './AuthContext';
 import { doc, collection, setDoc, addDoc, getDocs, serverTimestamp } from 'firebase/firestore';
 
 /* ─── Types / Shape ────────────────────────────────────────────────────
@@ -49,13 +51,14 @@ function branchLabel(content) {
   return content.slice(0, 48).replace(/\n/g, ' ').trim();
 }
 
-function makeNode({ parentId = null, role, content, model }) {
+function makeNode({ parentId = null, role, content, model, images = [] }) {
   return {
     id: nanoid(10),
     parentId,
     role,
     content,
     model,
+    images,
     timestamp: Date.now(),
     children: [],
     branchLabel: branchLabel(content),
@@ -75,25 +78,56 @@ function getPath(nodes, leafId) {
   return path;
 }
 
-/** Convert path to messages array (user/assistant) */
-function pathToMessages(path) {
-  return path.map((n) => ({ role: n.role, content: n.content }));
+/**
+ * Convert path to messages array for a given provider.
+ * When a node has images, build a multimodal content array.
+ */
+function pathToMessages(path, provider = 'anthropic') {
+  return path.map((n) => {
+    if (n.images && n.images.length > 0) {
+      if (provider === 'openai') {
+        return {
+          role: n.role,
+          content: [
+            ...n.images.map((img) => ({
+              type: 'image_url',
+              image_url: { url: `data:${img.mediaType};base64,${img.base64}` },
+            })),
+            { type: 'text', text: n.content || '' },
+          ],
+        };
+      }
+      return {
+        role: n.role,
+        content: [
+          ...n.images.map((img) => ({
+            type: 'image',
+            source: { type: 'base64', media_type: img.mediaType, data: img.base64 },
+          })),
+          { type: 'text', text: n.content || '' },
+        ],
+      };
+    }
+    return { role: n.role, content: n.content };
+  });
 }
 
 // ─── Reducer ─────────────────────────────────────────────────────────
 
 const ACTIONS = {
-  SET_PROVIDER_KEYS:   'SET_PROVIDER_KEYS',
-  SET_MODEL:           'SET_MODEL',
-  ADD_NODE:            'ADD_NODE',
-  SET_ACTIVE_LEAF:     'SET_ACTIVE_LEAF',
-  STREAMING_START:     'STREAMING_START',
-  STREAMING_CHUNK:     'STREAMING_CHUNK',
-  STREAMING_DONE:      'STREAMING_DONE',
-  STREAMING_ERROR:     'STREAMING_ERROR',
-  RESET_CONVERSATION:  'RESET_CONVERSATION',
-  SET_CONV_ID:         'SET_CONV_ID',
-  LOAD_CONVERSATION:   'LOAD_CONVERSATION',
+  SET_PROVIDER_KEYS:    'SET_PROVIDER_KEYS',
+  SET_KEY_MODE:         'SET_KEY_MODE',
+  SET_MODEL:            'SET_MODEL',
+  ADD_NODE:             'ADD_NODE',
+  SET_ACTIVE_LEAF:      'SET_ACTIVE_LEAF',
+  STREAMING_START:      'STREAMING_START',
+  STREAMING_CHUNK:      'STREAMING_CHUNK',
+  STREAMING_DONE:       'STREAMING_DONE',
+  STREAMING_ERROR:      'STREAMING_ERROR',
+  RESET_CONVERSATION:   'RESET_CONVERSATION',
+  SET_CONV_ID:          'SET_CONV_ID',
+  LOAD_CONVERSATION:    'LOAD_CONVERSATION',
+  ADD_SESSION_TOKENS:   'ADD_SESSION_TOKENS',
 };
 
 const initialState = {
@@ -105,6 +139,8 @@ const initialState = {
   isStreaming: false,
   model: DEFAULT_MODEL,
   ...readStoredProviderKeys(),
+  keyMode: readKeyMode(),
+  sessionTokensUsed: 0,
   error: null,
   firestoreConvId: null,
 };
@@ -125,6 +161,14 @@ function reducer(state, action) {
         error: null,
       };
     }
+
+    case ACTIONS.SET_KEY_MODE: {
+      saveKeyMode(action.payload);
+      return { ...state, keyMode: action.payload, sessionTokensUsed: 0 };
+    }
+
+    case ACTIONS.ADD_SESSION_TOKENS:
+      return { ...state, sessionTokensUsed: state.sessionTokensUsed + action.payload };
 
     case ACTIONS.SET_MODEL:
       return { ...state, model: action.payload };
@@ -197,7 +241,9 @@ function reducer(state, action) {
         ...initialState,
         anthropicApiKey: state.anthropicApiKey,
         openaiApiKey: state.openaiApiKey,
+        keyMode: state.keyMode,
         model: state.model,
+        sessionTokensUsed: 0,
       };
 
     case ACTIONS.SET_CONV_ID:
@@ -209,7 +255,9 @@ function reducer(state, action) {
         ...initialState,
         anthropicApiKey: state.anthropicApiKey,
         openaiApiKey: state.openaiApiKey,
+        keyMode: state.keyMode,
         model: state.model,
+        sessionTokensUsed: 0,
         nodes,
         rootId,
         activeLeafId,
@@ -225,6 +273,7 @@ function reducer(state, action) {
 // ─── Provider ────────────────────────────────────────────────────────
 
 export function ConversationProvider({ children, currentUser, isAtTokenLimit, addTokenUsage, onRequireSignup }) {
+  const { tokenLimit, isPremium } = useAuth();
   const [state, dispatch] = useReducer(reducer, initialState);
   const abortRef = useRef(null);
   const wasLoggedInRef = useRef(!!currentUser);
@@ -280,49 +329,77 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     dispatch({ type: ACTIONS.SET_PROVIDER_KEYS, payload });
   }, []);
 
+  const setKeyMode = useCallback((mode) => {
+    dispatch({ type: ACTIONS.SET_KEY_MODE, payload: mode });
+  }, []);
+
   const setModel = useCallback((model) => {
     dispatch({ type: ACTIONS.SET_MODEL, payload: model });
   }, []);
 
-  const sendMessage = useCallback(async (content) => {
-    if (!content.trim() || state.isStreaming) return;
+  const sendMessage = useCallback(async (content, images = []) => {
+    const hasContent = (content && content.trim()) || images.length > 0;
+    if (!hasContent || state.isStreaming) return;
 
-    if (isAtTokenLimit) {
+    if (isAtTokenLimit && state.keyMode !== 'api-keys') {
       dispatch({
         type: ACTIONS.STREAMING_ERROR,
-        payload: `You've reached your ${TOKEN_LIMIT.toLocaleString()} token limit for the free tier. Upgrade to continue chatting.`,
+        payload: `You've reached your monthly limit of ${tokenLimit.toLocaleString()} tokens on Grove credits. ${formatTokenLimitResetHint()} Use your own API key in settings to keep chatting, or wait until your allowance renews.`,
       });
       return;
     }
 
     const isLoggedIn = !!currentUser;
     const guestHasKey =
-      hasAnthropicAccess({ isLoggedIn: false, anthropicApiKey: state.anthropicApiKey }) ||
-      hasOpenaiAccess({ isLoggedIn: false, openaiApiKey: state.openaiApiKey });
+      hasAnthropicAccess({ isLoggedIn: false, anthropicApiKey: state.anthropicApiKey, keyMode: state.keyMode }) ||
+      hasOpenaiAccess({ isLoggedIn: false, openaiApiKey: state.openaiApiKey, keyMode: state.keyMode });
     if (!isLoggedIn && !guestHasKey) {
       onRequireSignup?.();
       return;
     }
 
     const parentId = state.activeLeafId;
+    const modelDef = MODELS.find((m) => m.id === state.model) || MODELS[0];
+    const provider = modelDef.provider;
+
+    // Strip previewUrl before storing (too large and not needed beyond the current session)
+    const storedImages = images.map(({ mediaType, base64 }) => ({ mediaType, base64 }));
 
     // 1. Create + add user node
-    const userNode = makeNode({ parentId, role: 'user', content: content.trim() });
+    const userNode = makeNode({ parentId, role: 'user', content: content.trim(), images: storedImages });
     dispatch({ type: ACTIONS.ADD_NODE, payload: { node: userNode, parentId } });
 
-    // 2. Persist to Firestore if logged in
-    const convId = await ensureConversation(content.trim());
+    // 2. Persist to Firestore if logged in (images omitted — base64 data too large)
+    const convId = await ensureConversation(content.trim() || '(image)');
     await saveMessageToFirestore(convId, userNode);
 
-    // 3. Build conversation context
+    // 3. Build conversation context with provider-specific multimodal format
     const historyPath = parentId ? getPath(state.nodes, parentId) : [];
+
+    const userContent = storedImages.length > 0
+      ? provider === 'openai'
+        ? [
+            ...storedImages.map((img) => ({
+              type: 'image_url',
+              image_url: { url: `data:${img.mediaType};base64,${img.base64}` },
+            })),
+            { type: 'text', text: content.trim() || '' },
+          ]
+        : [
+            ...storedImages.map((img) => ({
+              type: 'image',
+              source: { type: 'base64', media_type: img.mediaType, data: img.base64 },
+            })),
+            { type: 'text', text: content.trim() || '' },
+          ]
+      : content.trim();
+
     const messages = [
-      ...pathToMessages(historyPath),
-      { role: 'user', content: content.trim() },
+      ...pathToMessages(historyPath, provider),
+      { role: 'user', content: userContent },
     ];
 
     // 4. Create placeholder streaming node (assistant)
-    const modelDef = MODELS.find((m) => m.id === state.model) || MODELS[0];
     const assistantNode = makeNode({ parentId: userNode.id, role: 'assistant', content: '', model: state.model });
     dispatch({ type: ACTIONS.ADD_NODE, payload: { node: assistantNode, parentId: userNode.id } });
     dispatch({ type: ACTIONS.STREAMING_START, payload: { streamingNodeId: assistantNode.id } });
@@ -330,19 +407,21 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     const anthropicKey = effectiveAnthropicKey({
       isLoggedIn,
       anthropicApiKey: state.anthropicApiKey,
+      keyMode: state.keyMode,
     });
     const openaiKey = effectiveOpenaiKey({
       isLoggedIn,
       openaiApiKey: state.openaiApiKey,
+      keyMode: state.keyMode,
     });
 
     // 6. Stream response (route to correct provider)
     let accumulated = '';
-    const streamFn = modelDef?.provider === 'openai'
+    const streamFn = provider === 'openai'
       ? streamOpenAIMessage
       : streamMessage;
 
-    const streamParams = modelDef?.provider === 'openai'
+    const streamParams = provider === 'openai'
       ? { apiKey: openaiKey, model: state.model, messages }
       : { apiKey: anthropicKey, model: state.model, messages };
 
@@ -360,9 +439,14 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
         // Save completed assistant message
         const { content: cleanContent } = splitTopicFromContent(accumulated);
         await saveMessageToFirestore(convId, { ...assistantNode, content: cleanContent });
-        // Record token usage for logged-in users
+        // Record token usage
         const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
-        if (currentUser && totalTokens > 0 && addTokenUsage) {
+        if (state.keyMode === 'api-keys') {
+          // Track locally for the session display; don't bill against Grove credits
+          if (totalTokens > 0) {
+            dispatch({ type: ACTIONS.ADD_SESSION_TOKENS, payload: totalTokens });
+          }
+        } else if (currentUser && totalTokens > 0 && addTokenUsage) {
           await addTokenUsage(totalTokens);
         }
       },
@@ -373,7 +457,7 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
 
     abortRef.current = abort;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.activeLeafId, state.isStreaming, state.nodes, state.anthropicApiKey, state.openaiApiKey, state.model, state.firestoreConvId, currentUser, isAtTokenLimit, addTokenUsage, onRequireSignup]);
+  }, [state.activeLeafId, state.isStreaming, state.nodes, state.anthropicApiKey, state.openaiApiKey, state.model, state.keyMode, state.firestoreConvId, currentUser, isAtTokenLimit, tokenLimit, addTokenUsage, onRequireSignup]);
 
   const branchFrom = useCallback((nodeId) => {
     dispatch({ type: ACTIONS.SET_ACTIVE_LEAF, payload: nodeId });
@@ -403,16 +487,16 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
 
   useEffect(() => {
     const isLoggedIn = !!currentUser;
-    const hasA = hasAnthropicAccess({ isLoggedIn, anthropicApiKey: state.anthropicApiKey });
-    const hasO = hasOpenaiAccess({ isLoggedIn, openaiApiKey: state.openaiApiKey });
+    const hasA = hasAnthropicAccess({ isLoggedIn, anthropicApiKey: state.anthropicApiKey, keyMode: state.keyMode });
+    const hasO = hasOpenaiAccess({ isLoggedIn, openaiApiKey: state.openaiApiKey, keyMode: state.keyMode });
     const usable = (m) =>
-      m.tier !== 'blocked' &&
+      (m.tier !== 'blocked' || isPremium) &&
       ((m.provider === 'anthropic' && hasA) || (m.provider === 'openai' && hasO));
     const current = MODELS.find((m) => m.id === state.model);
     if (current && usable(current)) return;
     const next = MODELS.find(usable);
     if (next) dispatch({ type: ACTIONS.SET_MODEL, payload: next.id });
-  }, [currentUser, state.anthropicApiKey, state.openaiApiKey, state.model]);
+  }, [currentUser, state.anthropicApiKey, state.openaiApiKey, state.keyMode, state.model, isPremium]);
 
   const loadConversation = useCallback(async (uid, convId) => {
     if (!uid || !convId) return;
@@ -462,10 +546,13 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     model: state.model,
     anthropicApiKey: state.anthropicApiKey,
     openaiApiKey: state.openaiApiKey,
+    keyMode: state.keyMode,
+    sessionTokensUsed: state.sessionTokensUsed,
     error: state.error,
     firestoreConvId: state.firestoreConvId,
     getActivePath,
     setProviderKeys,
+    setKeyMode,
     setModel,
     sendMessage,
     branchFrom,

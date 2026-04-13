@@ -1,56 +1,37 @@
-import { useState, useEffect, useRef } from 'react';
-import { Key, Trash } from '@phosphor-icons/react';
+import { useState, useEffect } from 'react';
+import { Key, Trash, CreditCard, KeyReturn } from '@phosphor-icons/react';
 import { useConversation } from '../context/ConversationContext';
 import { useAuth } from '../context/AuthContext';
-import { guestHasAnyProviderKey } from '../lib/providerKeys';
 
 function maskKey(key) {
   if (!key) return null;
   return `${key.slice(0, 10)}${'•'.repeat(6)}${key.slice(-4)}`;
 }
 
-/**
- * Shown automatically when a guest has no API keys stored.
- * Can also be opened from outside via the `open` prop (Header key button).
- */
+/** Opened from the header key button via the `open` prop. */
 export default function ApiKeyModal({ open, onClose }) {
-  const { user } = useAuth();
-  const isGuest = !user;
-  const { anthropicApiKey, openaiApiKey, setProviderKeys } = useConversation();
-  const [internalVisible, setInternalVisible] = useState(
-    () => isGuest && !guestHasAnyProviderKey(),
-  );
+  const { anthropicApiKey, openaiApiKey, setProviderKeys, keyMode, setKeyMode } = useConversation();
+  const { isLoggedIn } = useAuth();
   const [draftAnthropic, setDraftAnthropic] = useState('');
   const [draftOpenai, setDraftOpenai] = useState('');
+  const [draftMode, setDraftMode] = useState(keyMode);
   const [confirmRemoveAnthropic, setConfirmRemoveAnthropic] = useState(false);
   const [confirmRemoveOpenai, setConfirmRemoveOpenai] = useState(false);
-  const wasLoggedInRef = useRef(!!user);
-
-  const visible = open || internalVisible;
 
   useEffect(() => {
-    if (!isGuest) setInternalVisible(false);
-  }, [isGuest]);
-
-  useEffect(() => {
-    const wasLoggedIn = wasLoggedInRef.current;
-    wasLoggedInRef.current = !!user;
-    if (wasLoggedIn && !user && !guestHasAnyProviderKey()) setInternalVisible(true);
-  }, [user]);
-
-  useEffect(() => {
-    if (visible) {
+    if (open) {
       setDraftAnthropic('');
       setDraftOpenai('');
+      setDraftMode(keyMode);
       setConfirmRemoveAnthropic(false);
       setConfirmRemoveOpenai(false);
     }
-  }, [visible]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
-  if (!visible) return null;
+  if (!open) return null;
 
   function handleClose() {
-    setInternalVisible(false);
     setConfirmRemoveAnthropic(false);
     setConfirmRemoveOpenai(false);
     onClose?.();
@@ -61,6 +42,9 @@ export default function ApiKeyModal({ open, onClose }) {
       anthropic: draftAnthropic.trim() || anthropicApiKey,
       openai: draftOpenai.trim() || openaiApiKey,
     });
+    if (isLoggedIn && draftMode !== keyMode) {
+      setKeyMode(draftMode);
+    }
     handleClose();
   }
 
@@ -118,6 +102,46 @@ export default function ApiKeyModal({ open, onClose }) {
         }}>
           Keys are stored locally in your browser and sent only to their respective provider.
         </p>
+
+        {/* Billing mode toggle — only for logged-in users */}
+        {isLoggedIn && (
+          <div style={{ marginBottom: '1.75rem' }}>
+            <span style={{
+              display: 'block',
+              fontSize: '0.6875rem',
+              fontWeight: 500,
+              letterSpacing: '0.09em',
+              textTransform: 'uppercase',
+              color: 'var(--color-text-secondary)',
+              marginBottom: '0.625rem',
+            }}>
+              Billing Mode
+            </span>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '0',
+              border: '1px solid var(--color-border-strong)',
+            }}>
+              <ModeOption
+                active={draftMode === 'credits'}
+                icon={<CreditCard size={14} />}
+                label="Grove Credits"
+                description="Use your included token balance"
+                onClick={() => setDraftMode('credits')}
+                side="left"
+              />
+              <ModeOption
+                active={draftMode === 'api-keys'}
+                icon={<KeyReturn size={14} />}
+                label="Your API Keys"
+                description="Billed directly to your provider"
+                onClick={() => setDraftMode('api-keys')}
+                side="right"
+              />
+            </div>
+          </div>
+        )}
 
         {/* Anthropic */}
         <ProviderField
@@ -178,6 +202,52 @@ export default function ApiKeyModal({ open, onClose }) {
         }
       `}</style>
     </div>
+  );
+}
+
+function ModeOption({ active, icon, label, description, onClick, side }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        gap: '0.25rem',
+        padding: '0.75rem 1rem',
+        background: active ? 'color-mix(in srgb, var(--color-accent) 10%, var(--color-bg))' : 'var(--color-bg)',
+        border: 'none',
+        borderRight: side === 'left' ? '1px solid var(--color-border-strong)' : 'none',
+        cursor: 'pointer',
+        textAlign: 'left',
+        transition: 'background 0.15s',
+        outline: active ? '2px solid var(--color-accent)' : '2px solid transparent',
+        outlineOffset: '-2px',
+      }}
+    >
+      <span style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.375rem',
+        fontSize: '0.8125rem',
+        fontWeight: active ? 500 : 400,
+        fontFamily: 'var(--font-body)',
+        color: active ? 'var(--color-accent)' : 'var(--color-text-primary)',
+        transition: 'color 0.15s',
+      }}>
+        {icon}
+        {label}
+      </span>
+      <span style={{
+        fontSize: '0.6875rem',
+        fontWeight: 300,
+        color: 'var(--color-text-tertiary)',
+        fontFamily: 'var(--font-body)',
+        lineHeight: 1.4,
+      }}>
+        {description}
+      </span>
+    </button>
   );
 }
 

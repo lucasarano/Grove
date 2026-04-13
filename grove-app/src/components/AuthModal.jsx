@@ -121,11 +121,10 @@ export default function AuthModal({ open, onClose, defaultMode = 'signup' }) {
     setError('');
     setSubmitting(true);
     try {
-      await signInWithGoogle();
-      onClose();
+      const out = await signInWithGoogle();
+      if (!out?.redirected) onClose();
     } catch (err) {
       setError(friendlyError(err.code || err.message));
-    } finally {
       setSubmitting(false);
     }
   }
@@ -154,6 +153,7 @@ export default function AuthModal({ open, onClose, defaultMode = 'signup' }) {
 
         {/* Google */}
         <button
+          type="button"
           onClick={handleGoogle}
           disabled={submitting}
           style={{
@@ -269,7 +269,12 @@ function friendlyError(code) {
     'auth/wrong-password':         'Incorrect password.',
     'auth/invalid-credential':     'Invalid email or password.',
     'auth/popup-closed-by-user':   'Google sign-in was cancelled.',
+    'auth/operation-not-allowed':  'Google sign-in is not enabled for this Firebase project. Enable it in Firebase Console → Authentication → Sign-in method.',
+    'auth/unauthorized-domain':  'This site’s domain is not allowed for Firebase Auth. Add it under Firebase Console → Authentication → Settings → Authorized domains.',
+    'auth/account-exists-with-different-credential':
+      'An account already exists with this email using a different sign-in method. Sign in with email/password, then link Google from account settings if needed.',
     'auth/network-request-failed': 'Network error — please try again.',
+    'auth/internal-error':         'Google sign-in failed in the browser. Try again, allow pop-ups, or use email sign-in.',
   };
   return map[code] || 'Something went wrong. Please try again.';
 }

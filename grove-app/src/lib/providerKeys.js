@@ -9,20 +9,29 @@ export function readStoredProviderKeys() {
   return { anthropicApiKey: anthropic, openaiApiKey: openai };
 }
 
+/** 'credits' = use Grove's hosted key; 'api-keys' = always use the user's own key */
+export function readKeyMode() {
+  return localStorage.getItem('grove_key_mode') || 'credits';
+}
+export function saveKeyMode(mode) {
+  localStorage.setItem('grove_key_mode', mode);
+}
+
 /**
- * Resolve which API keys are actually used for requests (env for hosted, local for BYOK).
+ * Resolve which API keys are actually used for requests.
+ * When keyMode === 'api-keys' logged-in users bypass the env key and use their own.
  */
-export function effectiveAnthropicKey({ isLoggedIn, anthropicApiKey }) {
+export function effectiveAnthropicKey({ isLoggedIn, anthropicApiKey, keyMode = 'credits' }) {
   const env = (import.meta.env.VITE_ANTHROPIC_API_KEY || '').trim();
   const local = (anthropicApiKey || '').trim();
-  if (isLoggedIn) return env || local;
+  if (isLoggedIn && keyMode === 'credits') return env || local;
   return local;
 }
 
-export function effectiveOpenaiKey({ isLoggedIn, openaiApiKey }) {
+export function effectiveOpenaiKey({ isLoggedIn, openaiApiKey, keyMode = 'credits' }) {
   const env = (import.meta.env.VITE_OPENAI_API_KEY || '').trim();
   const local = (openaiApiKey || '').trim();
-  if (isLoggedIn) return env || local;
+  if (isLoggedIn && keyMode === 'credits') return env || local;
   return local;
 }
 
