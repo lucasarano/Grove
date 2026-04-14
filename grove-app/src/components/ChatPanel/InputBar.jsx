@@ -31,6 +31,7 @@ const InputBar = forwardRef(function InputBar(_props, ref) {
   const [isDragging, setIsDragging] = useState(false);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
+  const hadStreamingTurnRef = useRef(false);
 
   useEffect(() => {
     const ta = textareaRef.current;
@@ -42,6 +43,20 @@ const InputBar = forwardRef(function InputBar(_props, ref) {
   useEffect(() => {
     textareaRef.current?.focus();
   }, [activeLeafId]);
+
+  useEffect(() => {
+    if (isStreaming) {
+      hadStreamingTurnRef.current = true;
+      return;
+    }
+    if (!hadStreamingTurnRef.current) return;
+    hadStreamingTurnRef.current = false;
+    if (enforceLimit) return;
+    const id = requestAnimationFrame(() => {
+      textareaRef.current?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [isStreaming, enforceLimit]);
 
   const addImages = useCallback(async (files) => {
     const imageFiles = Array.from(files)
@@ -68,6 +83,7 @@ const InputBar = forwardRef(function InputBar(_props, ref) {
 
   function handleKeyDown(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
+      if (!canSend) return;
       e.preventDefault();
       handleSend();
     }
@@ -268,11 +284,9 @@ const InputBar = forwardRef(function InputBar(_props, ref) {
                 ? 'Drop image here…'
                 : enforceLimit
                 ? 'Token limit reached…'
-                : isStreaming
-                ? 'Waiting for response…'
                 : 'Message Grove…'
             }
-            disabled={isStreaming || enforceLimit}
+            disabled={enforceLimit}
             rows={1}
             style={{
               flex: 1,
@@ -352,7 +366,9 @@ const InputBar = forwardRef(function InputBar(_props, ref) {
           color: 'var(--color-text-tertiary)',
           letterSpacing: '0.02em',
         }}>
-          Enter to send · Shift+Enter for newline · Drag & drop or attach images
+          {isStreaming
+            ? 'Draft your next message · sends when this reply finishes · Enter / Shift+Enter for new lines · drag & drop or attach images'
+            : 'Enter to send · Shift+Enter for newline · Drag & drop or attach images'}
         </p>
 
         {isLoggedIn && keyMode === 'credits' && (
