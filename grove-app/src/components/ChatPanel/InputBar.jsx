@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { forwardRef, useImperativeHandle, useState, useRef, useCallback, useEffect } from 'react';
 import { ArrowUp, Stop, Warning, Image, X } from '@phosphor-icons/react';
 import { useConversation } from '../../context/ConversationContext';
 import { useAuth, formatTokenLimitResetHint } from '../../context/AuthContext';
@@ -21,7 +21,7 @@ function readFileAsBase64(file) {
   });
 }
 
-export default function InputBar() {
+const InputBar = forwardRef(function InputBar(_props, ref) {
   const { sendMessage, isStreaming, abortStreaming, activeLeafId, nodes, keyMode, sessionTokensUsed } = useConversation();
   const { isLoggedIn, tokensRemaining, isAtTokenLimit, tokenLimit } = useAuth();
 
@@ -73,21 +73,20 @@ export default function InputBar() {
     }
   }
 
-  function handleDragOver(e) {
-    e.preventDefault();
-    if (!enforceLimit) setIsDragging(true);
-  }
-
-  function handleDragLeave(e) {
-    if (!e.currentTarget.contains(e.relatedTarget)) setIsDragging(false);
-  }
-
-  function handleDrop(e) {
-    e.preventDefault();
-    setIsDragging(false);
-    if (enforceLimit) return;
-    addImages(e.dataTransfer.files);
-  }
+  useImperativeHandle(ref, () => ({
+    addDroppedImages(files) {
+      setIsDragging(false);
+      if (enforceLimit) return;
+      addImages(files);
+    },
+    setChatImageDragging(isDragging) {
+      if (enforceLimit) {
+        setIsDragging(false);
+        return;
+      }
+      setIsDragging(isDragging);
+    },
+  }), [addImages, enforceLimit]);
 
   function handleFileChange(e) {
     addImages(e.target.files);
@@ -174,9 +173,6 @@ export default function InputBar() {
         }}
         onFocusCapture={(e) => { if (!enforceLimit && !isDragging) e.currentTarget.style.borderColor = 'var(--color-accent)'; }}
         onBlurCapture={(e) => { if (!enforceLimit && !isDragging) e.currentTarget.style.borderColor = 'var(--color-border-strong)'; }}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
       >
         {/* Image previews */}
         {images.length > 0 && (
@@ -395,4 +391,6 @@ export default function InputBar() {
       </div>
     </div>
   );
-}
+});
+
+export default InputBar;

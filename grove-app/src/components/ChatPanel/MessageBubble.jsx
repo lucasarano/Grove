@@ -166,6 +166,21 @@ const MD_COMPONENTS = {
   code: CodeBlock,
 };
 
+function normalizeLatexDelimiters(markdown) {
+  if (!markdown || typeof markdown !== 'string') return markdown;
+
+  // Preserve fenced code blocks so math normalization does not mutate code examples.
+  const segments = markdown.split(/(```[\s\S]*?```)/g);
+  return segments
+    .map((segment) => {
+      if (segment.startsWith('```')) return segment;
+      return segment
+        .replace(/\\\[((?:.|\n)*?)\\\]/g, (_, expr) => `$$${expr}$$`)
+        .replace(/\\\(((?:.|\n)*?)\\\)/g, (_, expr) => `$${expr}$`);
+    })
+    .join('');
+}
+
 function MessageBubble({ node, isStreaming = false, streamingContent = '' }) {
   const [hovered, setHovered] = useState(false);
   const messageRef = useRef(null);
@@ -175,6 +190,7 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '' }) {
   const isAssistant = node.role === 'assistant';
   const raw = isStreaming ? streamingContent : node.content;
   const content = isAssistant ? stripTopicBlockForDisplay(raw) : raw;
+  const markdownContent = normalizeLatexDelimiters(content);
 
   function handleBranch() {
     branchFrom(node.id);
@@ -284,10 +300,10 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '' }) {
         <div className={`prose ${isStreaming ? 'streaming-cursor' : ''}`} style={{ maxWidth: '680px' }}>
           <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={[rehypeKatex]}
+            rehypePlugins={[[rehypeKatex, { strict: false, throwOnError: false }]]}
             components={MD_COMPONENTS}
           >
-            {content || (isStreaming ? '' : '—')}
+            {markdownContent || (isStreaming ? '' : '—')}
           </ReactMarkdown>
         </div>
       </div>

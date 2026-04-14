@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ConversationProvider } from './context/ConversationContext';
 import Header from './components/Header';
@@ -9,10 +9,15 @@ import AuthModal from './components/AuthModal';
 import UpgradeModal from './components/UpgradeModal';
 import PremiumManageModal from './components/PremiumManageModal';
 import ConversationSidebar from './components/ConversationSidebar';
+import TutorialModal from './components/TutorialModal';
 
 const MIN_TREE_PX = 200;
 const MIN_CHAT_PX = 280;
 const DEFAULT_TREE_FRACTION = 0.32;
+
+/** Persisted when the user closes the onboarding tutorial (any dismiss). */
+const TUTORIAL_SEEN_STORAGE_KEY = 'grove:onboarding-seen-v1';
+const TUTORIAL_SEEN_LEGACY_KEY = 'grove:tutorial-seen';
 
 function MainLayout() {
   const layoutRef = useRef(null);
@@ -185,6 +190,36 @@ function AppInner() {
   const [premiumManageOpen, setPremiumManageOpen] = useState(false);
   const [sidebarOpen,   setSidebarOpen]   = useState(false);
   const [checkoutStatus, setCheckoutStatus] = useState(null); // 'success' | 'cancel' | null
+  const [tutorialOpen, setTutorialOpen] = useState(false);
+
+  const markTutorialSeen = useCallback(() => {
+    try {
+      window.localStorage.setItem(TUTORIAL_SEEN_STORAGE_KEY, '1');
+      window.localStorage.removeItem(TUTORIAL_SEEN_LEGACY_KEY);
+    } catch {
+      /* private mode / quota */
+    }
+  }, []);
+
+  const closeTutorial = useCallback(() => {
+    markTutorialSeen();
+    setTutorialOpen(false);
+  }, [markTutorialSeen]);
+
+  // Client-only: open on first visit before paint (useState initializer + localStorage is unreliable).
+  useLayoutEffect(() => {
+    try {
+      const store = window.localStorage;
+      if (store.getItem(TUTORIAL_SEEN_LEGACY_KEY) && !store.getItem(TUTORIAL_SEEN_STORAGE_KEY)) {
+        store.setItem(TUTORIAL_SEEN_STORAGE_KEY, store.getItem(TUTORIAL_SEEN_LEGACY_KEY));
+      }
+      if (!store.getItem(TUTORIAL_SEEN_STORAGE_KEY)) {
+        setTutorialOpen(true);
+      }
+    } catch {
+      setTutorialOpen(true);
+    }
+  }, []);
 
   // Handle ?checkout=success / ?checkout=cancel from Stripe redirect
   useEffect(() => {
@@ -204,9 +239,6 @@ function AppInner() {
     setAuthOpen(true);
   }, []);
 
-  // While Firebase resolves auth state, render nothing to avoid flash
-  if (loading) return null;
-
   return (
     <ConversationProvider
       currentUser={user}
@@ -222,6 +254,7 @@ function AppInner() {
           onToggleSidebar={() => setSidebarOpen((o) => !o)}
           onShowUpgrade={() => setUpgradeOpen(true)}
           onShowPremiumManage={() => setPremiumManageOpen(true)}
+          onShowTutorial={() => setTutorialOpen(true)}
         />
         <MainLayout />
         <ApiKeyModal open={apiKeyOpen} onClose={() => setApiKeyOpen(false)} />
@@ -229,6 +262,7 @@ function AppInner() {
         <UpgradeModal open={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
         <PremiumManageModal open={premiumManageOpen} onClose={() => setPremiumManageOpen(false)} />
         <CheckoutBanner status={checkoutStatus} onDismiss={() => setCheckoutStatus(null)} />
+        <TutorialModal open={tutorialOpen} onClose={closeTutorial} />
       </div>
     </ConversationProvider>
   );

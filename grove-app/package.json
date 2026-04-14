@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "vercel --prod --yes --scope grove-ai",
+    "deploy:preview": "vercel --yes --scope grove-ai"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.88.0",

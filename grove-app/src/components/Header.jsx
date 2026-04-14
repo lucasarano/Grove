@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import { Plus, Key, CaretDown, GitBranch, UserCircle, SignOut, Lock, List, Lightning } from '@phosphor-icons/react';
+import { Plus, Key, CaretDown, GitBranch, UserCircle, SignOut, Lock, List, Lightning, Question } from '@phosphor-icons/react';
 import { useConversation } from '../context/ConversationContext';
 import { useAuth } from '../context/AuthContext';
 import { MODELS } from '../services/claude';
 import { hasAnthropicAccess, hasOpenaiAccess } from '../lib/providerKeys';
 
-export default function Header({ onShowApiKey, onShowAuth, onToggleSidebar, onShowUpgrade, onShowPremiumManage }) {
+export default function Header({ onShowApiKey, onShowAuth, onToggleSidebar, onShowUpgrade, onShowPremiumManage, onShowTutorial }) {
   const { model, setModel, resetConversation, isStreaming, anthropicApiKey, openaiApiKey } = useConversation();
   const { user, isLoggedIn, isPremium, logout } = useAuth();
   const [modelOpen,   setModelOpen]   = useState(false);
@@ -84,8 +84,38 @@ export default function Header({ onShowApiKey, onShowAuth, onToggleSidebar, onSh
         </div>
       </div>
 
-      {/* Controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+      {/* Controls — help + keys first so they stay visible when the row overflows (root has overflow:hidden) */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--space-2)',
+          minWidth: 0,
+          flexShrink: 1,
+        }}
+      >
+        <button
+          id="tutorial-btn"
+          type="button"
+          className="btn-icon"
+          onClick={onShowTutorial}
+          title="How Grove works"
+          aria-label="How Grove works"
+          style={{ flexShrink: 0 }}
+        >
+          <Question size={18} />
+        </button>
+
+        <button
+          id="api-key-btn"
+          type="button"
+          className="btn-icon"
+          onClick={onShowApiKey}
+          title={isLoggedIn ? 'API keys (optional override)' : 'API keys'}
+          style={{ flexShrink: 0 }}
+        >
+          <Key size={18} />
+        </button>
 
         {/* Free credits prompt — shown when NOT logged in */}
         {!isLoggedIn && (
@@ -299,15 +329,6 @@ export default function Header({ onShowApiKey, onShowAuth, onToggleSidebar, onSh
             </div>
           )}
         </div>
-
-        <button
-          id="api-key-btn"
-          className="btn-icon"
-          onClick={onShowApiKey}
-          title={isLoggedIn ? 'API keys (optional override)' : 'API keys'}
-        >
-          <Key size={18} />
-        </button>
 
         {/* User menu — shown when logged in */}
         {isLoggedIn && (
