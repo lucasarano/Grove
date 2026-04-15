@@ -47,6 +47,11 @@ const ConversationContext = createContext(null);
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
+const RECENT_CONTEXT_TURNS = 10;
+const SUMMARY_MAX_LINES = 32;
+const SUMMARY_HEAD_LINES = 8;
+const SUMMARY_TEXT_LIMIT = 360;
+
 function branchLabel(content) {
   return content.slice(0, 48).replace(/\n/g, ' ').trim();
 }
@@ -166,6 +171,87 @@ function selectionSystemPrompt(selectionQuote, sourceAssistantPlain = null) {
     prompt += `\nNearby context:\n${win}`;
   }
   return prompt;
+}
+
+function compactContextText(text, maxLength = SUMMARY_TEXT_LIMIT) {
+  const clean = (text || '').replace(/\s+/g, ' ').trim();
+  if (clean.length <= maxLength) return clean;
+  return `${clean.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function nodeTextForSummary(node) {
+  const baseText = node.role === 'assistant'
+    ? assistantPlainTextForModel(node.content)
+    : node.content;
+  const parts = [];
+  const text = compactContextText(baseText);
+  if (text) parts.push(text);
+  if (node.selectionQuote) {
+    parts.push(`Referenced: "${compactContextText(node.selectionQuote, 120)}"`);
+  }
+  if (node.images?.length) {
+    parts.push(`[${node.images.length} image${node.images.length === 1 ? '' : 's'} attached]`);
+  }
+  return parts.join(' ');
+}
+
+function summarizeOlderPath(path) {
+  if (!path.length) return null;
+
+  let lines = path
+    .map((node) => {
+      const text = nodeTextForSummary(node);
+      if (!text) return null;
+      const label = node.role === 'assistant' ? 'Assistant' : 'User';
+      return `- ${label}: ${text}`;
+    })
+    .filter(Boolean);
+
+  if (!lines.length) return null;
+
+  if (lines.length > SUMMARY_MAX_LINES) {
+    const tailCount = SUMMARY_MAX_LINES - SUMMARY_HEAD_LINES - 1;
+    const omitted = lines.length - SUMMARY_HEAD_LINES - tailCount;
+    lines = [
+      ...lines.slice(0, SUMMARY_HEAD_LINES),
+      `- ${omitted} older messages omitted from this compact summary.`,
+      ...lines.slice(-tailCount),
+    ];
+  }
+
+  return [
+    'Older conversation summary. These older turns are not sent verbatim; use this only as background:',
+    ...lines,
+  ].join('\n');
+}
+
+function splitPathForRecentTurns(path, turnLimit = RECENT_CONTEXT_TURNS) {
+  const userIndexes = path
+    .map((node, index) => (node.role === 'user' ? index : -1))
+    .filter((index) => index !== -1);
+
+  if (userIndexes.length <= turnLimit) {
+    return { olderPath: [], recentPath: path };
+  }
+
+  const firstRecentIndex = userIndexes[userIndexes.length - turnLimit];
+  return {
+    olderPath: path.slice(0, firstRecentIndex),
+    recentPath: path.slice(firstRecentIndex),
+  };
+}
+
+function joinSystemPrompts(...parts) {
+  const joined = parts.filter(Boolean).join('\n\n');
+  return joined || null;
+}
+
+function contextPayloadFromPath(path, provider) {
+  const { olderPath, recentPath } = splitPathForRecentTurns(path);
+  return {
+    messages: pathToMessages(recentPath, provider),
+    systemPrompt: summarizeOlderPath(olderPath),
+  };
 }
 
 /**
@@ -515,7 +601,7 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     const sourceAssistantPlain = sourceNode?.role === 'assistant'
       ? assistantPlainTextForModel(sourceNode.content)
       : null;
-    const turnSystemPrompt = selectionQuote
+    const selectionPrompt = selectionQuote
       ? selectionSystemPrompt(selectionQuote, sourceAssistantPlain)
       : null;
 
@@ -539,10 +625,12 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
           ]
       : modelText;
 
+    const contextPayload = contextPayloadFromPath(historyPath, provider);
     const messages = [
-      ...pathToMessages(historyPath, provider),
+      ...contextPayload.messages,
       { role: 'user', content: userContent },
     ];
+    const turnSystemPrompt = joinSystemPrompts(contextPayload.systemPrompt, selectionPrompt);
 
     // 4. Create placeholder streaming node (assistant)
     const assistantNode = makeNode({ parentId: userNode.id, role: 'assistant', content: '', model: state.model });
@@ -681,14 +769,18 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
         : null;
 
     const historyPath = getPath(state.nodes, contextNodeId);
+    const contextPayload = contextPayloadFromPath(historyPath, provider);
     const messages = [
-      ...pathToMessages(historyPath, provider),
+      ...contextPayload.messages,
       {
         role: 'user',
         content: content.trim(),
       },
     ];
-    const turnSystemPrompt = selectionSystemPrompt(selectionText, sourceAssistantPlain);
+    const turnSystemPrompt = joinSystemPrompts(
+      contextPayload.systemPrompt,
+      selectionSystemPrompt(selectionText, sourceAssistantPlain),
+    );
 
     const assistantNode = makeNode({ parentId: userNode.id, role: 'assistant', content: '', model: state.model });
     dispatch({ type: ACTIONS.ADD_NODE, payload: { node: assistantNode, parentId: userNode.id, preserveActiveLeaf } });
