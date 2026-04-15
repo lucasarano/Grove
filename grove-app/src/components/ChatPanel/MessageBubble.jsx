@@ -332,9 +332,9 @@ function wrapTextInElement(root, searchText, branchId, onClick) {
     const parent = node.parentNode;
     if (!parent) continue;
 
-    if (after) parent.insertBefore(document.createTextNode(after), node);
-    parent.insertBefore(mark, node);
     if (before) parent.insertBefore(document.createTextNode(before), node);
+    parent.insertBefore(mark, node);
+    if (after) parent.insertBefore(document.createTextNode(after), node);
     parent.removeChild(node);
   }
 }
