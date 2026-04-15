@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
-import { Plus, Key, CaretDown, GitBranch, UserCircle, SignOut, Lock, List, Lightning, Question } from '@phosphor-icons/react';
+import { Plus, CaretDown, GitBranch, UserCircle, SignOut, List, Lightning, Question } from '@phosphor-icons/react';
 import { useConversation } from '../context/ConversationContext';
 import { useAuth } from '../context/AuthContext';
 import { MODELS } from '../services/claude';
 import { hasAnthropicAccess, hasOpenaiAccess } from '../lib/providerKeys';
 
-export default function Header({ onShowApiKey, onShowAuth, onToggleSidebar, onShowUpgrade, onShowPremiumManage, onShowTutorial }) {
+export default function Header({ onShowAuth, onToggleSidebar, onShowUpgrade, onShowPremiumManage, onShowTutorial }) {
   const { model, setModel, resetConversation, isStreaming, anthropicApiKey, openaiApiKey } = useConversation();
   const { user, isLoggedIn, isPremium, logout } = useAuth();
   const [modelOpen,   setModelOpen]   = useState(false);
@@ -104,17 +104,6 @@ export default function Header({ onShowApiKey, onShowAuth, onToggleSidebar, onSh
           style={{ flexShrink: 0 }}
         >
           <Question size={18} />
-        </button>
-
-        <button
-          id="api-key-btn"
-          type="button"
-          className="btn-icon"
-          onClick={onShowApiKey}
-          title={isLoggedIn ? 'API keys (optional override)' : 'API keys'}
-          style={{ flexShrink: 0 }}
-        >
-          <Key size={18} />
         </button>
 
         {/* Free credits prompt — shown when NOT logged in */}
@@ -400,10 +389,14 @@ export default function Header({ onShowApiKey, onShowAuth, onToggleSidebar, onSh
           className="btn-primary"
           onClick={resetConversation}
           disabled={isStreaming}
-          style={{ padding: '0.5rem 1rem', gap: '0.375rem' }}
+          style={{
+            padding: '0.375rem 0.75rem',
+            gap: '0.375rem',
+            fontSize: '0.8125rem',
+          }}
         >
           <Plus size={14} />
-          New
+          New Chat
         </button>
       </div>
     </header>

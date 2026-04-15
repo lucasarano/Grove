@@ -5,7 +5,6 @@ import { ConversationProvider } from './context/ConversationContext';
 import Header from './components/Header';
 import ChatPanel from './components/ChatPanel/ChatPanel';
 import TreePanel from './components/TreePanel/TreePanel';
-import ApiKeyModal from './components/ApiKeyModal';
 import AuthModal from './components/AuthModal';
 import UpgradeModal from './components/UpgradeModal';
 import PremiumManageModal from './components/PremiumManageModal';
@@ -336,7 +335,6 @@ function CheckoutBanner({ status, onDismiss }) {
 
 function AppInner() {
   const { user, loading, isAtTokenLimit, addTokenUsage } = useAuth();
-  const [apiKeyOpen,    setApiKeyOpen]    = useState(false);
   const [authOpen,      setAuthOpen]      = useState(false);
   const [authModalMode, setAuthModalMode] = useState('signup');
   const [upgradeOpen,   setUpgradeOpen]   = useState(false);
@@ -402,7 +400,6 @@ function AppInner() {
       <ConversationSidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
         <Header
-          onShowApiKey={() => setApiKeyOpen(true)}
           onShowAuth={() => openAuthModal('signin')}
           onToggleSidebar={() => setSidebarOpen((o) => !o)}
           onShowUpgrade={() => setUpgradeOpen(true)}
@@ -410,7 +407,6 @@ function AppInner() {
           onShowTutorial={() => setTutorialOpen(true)}
         />
         <MainLayout />
-        <ApiKeyModal open={apiKeyOpen} onClose={() => setApiKeyOpen(false)} />
         <AuthModal open={authOpen} defaultMode={authModalMode} onClose={() => setAuthOpen(false)} />
         <UpgradeModal open={upgradeOpen} onClose={() => setUpgradeOpen(false)} />
         <PremiumManageModal open={premiumManageOpen} onClose={() => setPremiumManageOpen(false)} />
