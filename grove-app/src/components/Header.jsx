@@ -147,13 +147,13 @@ export default function Header({ onShowApiKey, onShowAuth, onToggleSidebar, onSh
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '0.3rem',
+              gap: '0.375rem',
               background: 'transparent',
               border: '1px solid var(--color-accent-dim)',
-              padding: '0.3125rem 0.75rem',
+              padding: '0.375rem 0.75rem',
               cursor: 'pointer',
               fontFamily: 'var(--font-body)',
-              fontSize: '0.75rem',
+              fontSize: '0.8125rem',
               fontWeight: 500,
               letterSpacing: '0.06em',
               textTransform: 'uppercase',
@@ -170,7 +170,7 @@ export default function Header({ onShowApiKey, onShowAuth, onToggleSidebar, onSh
               e.currentTarget.style.borderColor = 'var(--color-accent-dim)';
             }}
           >
-            <Lightning size={12} weight="fill" />
+            <Lightning size={14} weight="fill" />
             Upgrade
           </button>
         )}
@@ -184,13 +184,13 @@ export default function Header({ onShowApiKey, onShowAuth, onToggleSidebar, onSh
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '0.3rem',
+              gap: '0.375rem',
               background: 'color-mix(in srgb, var(--color-accent) 10%, transparent)',
               border: '1px solid var(--color-accent-dim)',
-              padding: '0.3125rem 0.75rem',
+              padding: '0.375rem 0.75rem',
               cursor: 'pointer',
               fontFamily: 'var(--font-body)',
-              fontSize: '0.75rem',
+              fontSize: '0.8125rem',
               fontWeight: 500,
               letterSpacing: '0.06em',
               textTransform: 'uppercase',
@@ -207,7 +207,7 @@ export default function Header({ onShowApiKey, onShowAuth, onToggleSidebar, onSh
               e.currentTarget.style.borderColor = 'var(--color-accent-dim)';
             }}
           >
-            <Lightning size={12} weight="fill" />
+            <Lightning size={14} weight="fill" />
             Premium
           </button>
         )}

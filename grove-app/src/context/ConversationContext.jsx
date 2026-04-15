@@ -51,7 +51,7 @@ function branchLabel(content) {
   return content.slice(0, 48).replace(/\n/g, ' ').trim();
 }
 
-function makeNode({ parentId = null, role, content, model, images = [], selectionQuote = null }) {
+function makeNode({ parentId = null, role, content, model, images = [], selectionQuote = null, selectionSourceNodeId = null }) {
   return {
     id: nanoid(10),
     parentId,
@@ -60,6 +60,7 @@ function makeNode({ parentId = null, role, content, model, images = [], selectio
     model,
     images,
     selectionQuote,
+    selectionSourceNodeId,
     timestamp: Date.now(),
     children: [],
     branchLabel: branchLabel(content),
@@ -94,13 +95,16 @@ function getPath(nodes, leafId) {
 }
 
 /**
- * Prepend a selection quote to the message text sent to the model.
- * The phrasing makes it unambiguous that the excerpt is FROM the
- * assistant's previous response, not a truncated user message.
+ * Append the highlighted excerpt to the user's message as a plain
+ * parenthetical.  An earlier "System context — do not acknowledge" framing
+ * caused smaller models (e.g. Haiku) to interpret the instruction as
+ * "pretend you have no context" and respond with "I don't see any highlighted
+ * text."  A simple, natural parenthetical is clearer and more reliable.
  */
 function withSelectionQuote(text, selectionQuote) {
   if (!selectionQuote) return text || '';
-  return `${text || ''}\n\n[Context: the above question refers to this excerpt from your previous response — use it silently to understand what is being asked, but answer naturally as if it were a fresh question without quoting or explicitly referencing this excerpt (the selection edges may be slightly imprecise): "${selectionQuote}"]`;
+  const ref = `(Referring to: "${selectionQuote}")`;
+  return text ? `${text}\n\n${ref}` : ref;
 }
 
 /**
@@ -202,7 +206,7 @@ function reducer(state, action) {
       return { ...state, model: action.payload };
 
     case ACTIONS.ADD_NODE: {
-      const { node, parentId } = action.payload;
+      const { node, parentId, preserveActiveLeaf = false } = action.payload;
       const nodes = { ...state.nodes, [node.id]: node };
 
       if (parentId && nodes[parentId]) {
@@ -216,7 +220,9 @@ function reducer(state, action) {
         ...state,
         nodes,
         rootId: state.rootId ?? node.id,
-        activeLeafId: node.id,
+        // When branching from a split panel we don't want to move the main
+        // panel's active leaf — the caller tracks its own leaf separately.
+        activeLeafId: preserveActiveLeaf ? state.activeLeafId : node.id,
         error: null,
       };
     }
@@ -381,7 +387,16 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     dispatch({ type: ACTIONS.SET_MODEL, payload: model });
   }, []);
 
-  const sendMessage = useCallback(async (content, images = []) => {
+  /**
+   * @param {string} content
+   * @param {Array}  images
+   * @param {{ fromNodeId?: string|null, onNodeCreated?: (id:string)=>void }} [opts]
+   *   fromNodeId    – use this node as parent instead of activeLeafId; does NOT
+   *                   change activeLeafId so the main panel is unaffected.
+   *   onNodeCreated – called with each newly created node id (user then assistant)
+   *                   so the caller can track its own leaf independently.
+   */
+  const sendMessage = useCallback(async (content, images = [], { fromNodeId = null, onNodeCreated = null } = {}) => {
     const hasContent = (content && content.trim()) || images.length > 0;
     if (!hasContent || state.isStreaming) return;
 
@@ -402,7 +417,8 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
       return;
     }
 
-    const parentId = state.activeLeafId;
+    const parentId = fromNodeId ?? state.activeLeafId;
+    const preserveActiveLeaf = !!fromNodeId;
     const modelDef = MODELS.find((m) => m.id === state.model) || MODELS[0];
     const provider = modelDef.provider;
 
@@ -411,7 +427,8 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
 
     // 1. Create + add user node
     const userNode = makeNode({ parentId, role: 'user', content: content.trim(), images: storedImages });
-    dispatch({ type: ACTIONS.ADD_NODE, payload: { node: userNode, parentId } });
+    dispatch({ type: ACTIONS.ADD_NODE, payload: { node: userNode, parentId, preserveActiveLeaf } });
+    onNodeCreated?.(userNode.id);
 
     // 2. Persist to Firestore if logged in (images omitted — base64 data too large)
     const convId = await ensureConversation(content.trim() || '(image)');
@@ -445,7 +462,8 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
 
     // 4. Create placeholder streaming node (assistant)
     const assistantNode = makeNode({ parentId: userNode.id, role: 'assistant', content: '', model: state.model });
-    dispatch({ type: ACTIONS.ADD_NODE, payload: { node: assistantNode, parentId: userNode.id } });
+    dispatch({ type: ACTIONS.ADD_NODE, payload: { node: assistantNode, parentId: userNode.id, preserveActiveLeaf } });
+    onNodeCreated?.(assistantNode.id);
     dispatch({ type: ACTIONS.STREAMING_START, payload: { streamingNodeId: assistantNode.id } });
 
     const anthropicKey = effectiveAnthropicKey({
@@ -509,7 +527,19 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
    * and records the selection highlight on that node so MessageBubble
    * can render a clickable mark.
    */
-  const branchAndSend = useCallback(async (assistantNodeId, content, selectionText) => {
+  /**
+   * `highlightNodeId` is the node the user actually highlighted (where the visual
+   * mark is stored). It defaults to `assistantNodeId` but differs when we branch
+   * from a grandparent while still recording the highlight on the leaf.
+   */
+  /**
+   * @param {string} assistantNodeId  – branch parent (assistant node)
+   * @param {string} content          – user's prompt
+   * @param {string} selectionText    – highlighted excerpt
+   * @param {string|null} highlightNodeId – node that carries the visual mark
+   * @param {{ preserveActiveLeaf?: boolean, onNodeCreated?: (id:string)=>void }} [opts]
+   */
+  const branchAndSend = useCallback(async (assistantNodeId, content, selectionText, highlightNodeId = null, { preserveActiveLeaf = false, onNodeCreated = null } = {}) => {
     if (!content?.trim() || state.isStreaming) return;
 
     if (isAtTokenLimit && state.keyMode !== 'api-keys') {
@@ -533,13 +563,21 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     const modelDef = MODELS.find((m) => m.id === state.model) || MODELS[0];
     const provider = modelDef.provider;
 
-    const userNode = makeNode({ parentId, role: 'user', content: content.trim(), images: [], selectionQuote: selectionText });
-    dispatch({ type: ACTIONS.ADD_NODE, payload: { node: userNode, parentId } });
+    const userNode = makeNode({
+      parentId,
+      role: 'user',
+      content: content.trim(),
+      images: [],
+      selectionQuote: selectionText,
+      selectionSourceNodeId: highlightNodeId ?? assistantNodeId,
+    });
+    dispatch({ type: ACTIONS.ADD_NODE, payload: { node: userNode, parentId, preserveActiveLeaf } });
+    onNodeCreated?.(userNode.id);
 
     dispatch({
       type: ACTIONS.ADD_SELECTION_BRANCH,
       payload: {
-        nodeId: assistantNodeId,
+        nodeId: highlightNodeId ?? assistantNodeId,
         branch: { id: nanoid(8), text: selectionText, childNodeId: userNode.id },
       },
     });
@@ -554,7 +592,8 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     ];
 
     const assistantNode = makeNode({ parentId: userNode.id, role: 'assistant', content: '', model: state.model });
-    dispatch({ type: ACTIONS.ADD_NODE, payload: { node: assistantNode, parentId: userNode.id } });
+    dispatch({ type: ACTIONS.ADD_NODE, payload: { node: assistantNode, parentId: userNode.id, preserveActiveLeaf } });
+    onNodeCreated?.(assistantNode.id);
     dispatch({ type: ACTIONS.STREAMING_START, payload: { streamingNodeId: assistantNode.id } });
 
     const anthropicKey = effectiveAnthropicKey({ isLoggedIn, anthropicApiKey: state.anthropicApiKey, keyMode: state.keyMode });
@@ -647,16 +686,17 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     snap.forEach((d) => {
       const data = d.data();
       nodes[data.id] = {
-        id:              data.id,
-        parentId:        data.parentId ?? null,
-        role:            data.role,
-        content:         data.content,
-        model:           data.model ?? null,
-        topicLabel:      data.topicLabel ?? undefined,
-        selectionQuote:  data.selectionQuote ?? null,
-        timestamp:       data.timestamp,
-        children:        [],
-        branchLabel:     branchLabel(data.content || ''),
+        id:                    data.id,
+        parentId:              data.parentId ?? null,
+        role:                  data.role,
+        content:               data.content,
+        model:                 data.model ?? null,
+        topicLabel:            data.topicLabel ?? undefined,
+        selectionQuote:        data.selectionQuote ?? null,
+        selectionSourceNodeId: data.selectionSourceNodeId ?? null,
+        timestamp:             data.timestamp,
+        children:              [],
+        branchLabel:           branchLabel(data.content || ''),
       };
     });
 

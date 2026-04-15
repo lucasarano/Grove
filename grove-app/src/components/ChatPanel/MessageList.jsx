@@ -6,7 +6,7 @@ import { useConversation } from '../../context/ConversationContext';
 
 const NEAR_BOTTOM_PX = 80;
 
-export default function MessageList({ items }) {
+export default function MessageList({ items, onBranchNodeCreated = null, panelLeafId = null }) {
   const { streamingNodeId, streamingContent } = useConversation();
   const listRef = useRef(null);
   const prevLengthRef = useRef(0);
@@ -106,6 +106,8 @@ export default function MessageList({ items }) {
             node={node}
             isStreaming={isStreaming}
             streamingContent={isStreaming ? streamingContent : ''}
+            onBranchNodeCreated={onBranchNodeCreated}
+            panelLeafId={panelLeafId}
           />
         );
       })}

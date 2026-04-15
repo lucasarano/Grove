@@ -1,10 +1,15 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, ArrowRight, GitBranch, GitFork, X } from '@phosphor-icons/react';
+import { ArrowLeft, ArrowRight, GitBranch, GitFork, Robot, User, X } from '@phosphor-icons/react';
 
 /* ─── Tree layout constants (mirrors TreeCanvas.jsx) ─────────────── */
 const NODE_W = 164;
 const NODE_H = 60;
+
+/* ─── Split / compare colours (mirrors TreeCanvas.jsx) ──────────── */
+const SPLIT_COLOR        = '#a03434';
+const SPLIT_COLOR_BG     = 'rgba(160,52,52,0.05)';
+const SPLIT_COLOR_BORDER = 'rgba(160,52,52,0.35)';
 
 /* ─── Static mock tree data ──────────────────────────────────────── */
 const MOCK_NODES = {
@@ -35,49 +40,70 @@ const TREE_H = 260;
 /* ─── Tutorial step definitions ───────────────────────────────────── */
 const STEPS = [
   {
-    eyebrow: 'Step 1 of 5',
+    eyebrow: 'Step 1 of 7',
     title: 'Welcome to Grove',
     body: 'Grove is an AI learning tool built around a simple idea: your process shouldn\'t disappear as a conversation grows.',
     visibleTurnIds: [],
     activeTurnId: null,
     pathTurnIds: [],
     showBranchHint: false,
+    showType: 'tree',
   },
   {
-    eyebrow: 'Step 2 of 5',
+    eyebrow: 'Step 2 of 7',
     title: 'Every exchange becomes a Turn',
     body: 'Ask a question and the AI responds. The active card is highlighted in green. The tree panel on the right tracks your conversation.',
     visibleTurnIds: ['a1'],
     activeTurnId: 'a1',
     pathTurnIds: ['a1'],
     showBranchHint: false,
+    showType: 'tree',
   },
   {
-    eyebrow: 'Step 3 of 5',
+    eyebrow: 'Step 3 of 7',
     title: 'Branch to explore another angle',
     body: 'Hover any AI response in the chat and Branch. This creates two paths from the same point without losing your conversation.',
     visibleTurnIds: ['a1', 'a2a', 'a2b'],
     activeTurnId: 'a1',
     pathTurnIds: ['a1'],
     showBranchHint: true,
+    showType: 'tree',
   },
   {
-    eyebrow: 'Step 4 of 5',
+    eyebrow: 'Step 4 of 7',
     title: 'Follow Path A as deep as you like',
     body: 'You chose to go deeper into path A. The highlighted path traces your full journey. You always have the option to rollback and branch into path B.',
     visibleTurnIds: ['a1', 'a2a', 'a2b', 'a3'],
     activeTurnId: 'a3',
     pathTurnIds: ['a1', 'a2a', 'a3'],
     showBranchHint: false,
+    showType: 'tree',
   },
   {
-    eyebrow: 'Step 5 of 5',
+    eyebrow: 'Step 5 of 7',
     title: 'Jump to Path B, nothing is lost',
     body: 'Click any card in the tree to switch paths instantly.\n\nAI will only have the context of the path you are in.',
     visibleTurnIds: ['a1', 'a2a', 'a2b', 'a3'],
     activeTurnId: 'a2b',
     pathTurnIds: ['a1', 'a2b'],
     showBranchHint: false,
+    showType: 'tree',
+  },
+  {
+    eyebrow: 'Step 6 of 7',
+    title: 'Highlight text to branch',
+    body: 'Select any text in a response and branch from it. Type a follow-up question without loosing the current path.',
+    showBranchHint: false,
+    showHighlightHint: true,
+    showType: 'highlight',
+  },
+  {
+    eyebrow: 'Step 7 of 7',
+    title: 'Compare branches side by side',
+    body: 'Drag any card from the Conversation Tree into the chat to compare both branches at the same time.',
+    showBranchHint: false,
+    showDragHint: true,
+    showType: 'compare',
   },
 ];
 
@@ -347,6 +373,358 @@ function TreePreview({ step }) {
   );
 }
 
+/* ─── Highlight-to-branch preview ────────────────────────────────── */
+function MockHighlightPreview() {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        background: 'var(--color-bg-alt)',
+        border: '1px solid var(--color-border)',
+        overflow: 'hidden',
+        flexShrink: 0,
+      }}
+    >
+      {/* Panel header */}
+      <div
+        style={{
+          flexShrink: 0,
+          height: '36px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.4rem',
+          padding: '0 12px',
+          borderBottom: '1px solid var(--color-border)',
+          background: 'var(--color-bg-alt)',
+        }}
+      >
+        <span
+          style={{
+            fontSize: '0.6875rem',
+            fontWeight: 500,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            color: 'var(--color-text-tertiary)',
+          }}
+        >
+          Chat
+        </span>
+      </div>
+
+      {/* Content */}
+      <div
+        style={{
+          flex: 1,
+          padding: '18px 16px 14px',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          gap: 0,
+        }}
+      >
+        {/* Branch popover */}
+        <div
+          style={{
+            background: 'var(--color-surface)',
+            border: '1px solid var(--color-accent-dim)',
+            padding: '0.45rem 0.6rem',
+            boxShadow: '0 4px 16px rgba(26,26,24,0.18), 0 0 0 1px rgba(61,90,71,0.10)',
+            animation: 'tutorialPulse 2s ease-in-out infinite',
+            pointerEvents: 'none',
+            userSelect: 'none',
+          }}
+        >
+          <div
+            style={{
+              fontSize: '0.68rem',
+              marginBottom: '5px',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            <span style={{ color: 'var(--color-accent)', fontWeight: 500 }}>Branch from </span>
+            <span style={{ color: 'var(--color-text-secondary)', fontStyle: 'italic' }}>&ldquo;learning from data and improving…&rdquo;</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <div style={{ flex: 1, fontSize: '0.78rem', color: 'var(--color-text-tertiary)' }}>
+              Dig deeper...
+            </div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.3rem',
+                background: 'var(--color-accent)',
+                padding: '0.22rem 0.55rem',
+                fontSize: '0.63rem',
+                fontWeight: 500,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                color: '#fff',
+              }}
+            >
+              <GitFork size={10} weight="bold" />
+              Branch
+            </div>
+          </div>
+        </div>
+
+        {/* Caret pointing down to the highlighted text */}
+        <div
+          style={{
+            width: 0,
+            height: 0,
+            borderLeft: '6px solid transparent',
+            borderRight: '6px solid transparent',
+            borderTop: '6px solid var(--color-accent-dim)',
+            marginLeft: '20px',
+            marginBottom: '5px',
+            flexShrink: 0,
+          }}
+        />
+
+        {/* Assistant message with highlighted selection */}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <div
+            style={{
+              width: 22,
+              height: 22,
+              flexShrink: 0,
+              background: 'var(--color-accent)',
+              border: '1px solid var(--color-accent)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Robot size={11} color="#fff" />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div
+              style={{
+                fontSize: '0.6rem',
+                fontWeight: 600,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                color: 'var(--color-accent)',
+                marginBottom: '4px',
+              }}
+            >
+              Assistant
+            </div>
+            <div
+              style={{
+                fontSize: '0.8rem',
+                color: 'var(--color-text-secondary)',
+                lineHeight: 1.65,
+              }}
+            >
+              Machine learning is a field of AI focused on{' '}
+              <mark
+                style={{
+                  background: 'color-mix(in srgb, var(--color-accent) 28%, transparent)',
+                  color: 'inherit',
+                  borderRadius: '2px',
+                  padding: '1px 0',
+                  borderBottom: '1.5px solid color-mix(in srgb, var(--color-accent) 70%, transparent)',
+                }}
+              >
+                learning from data and improving over time
+              </mark>
+              {' '}without being explicitly programmed.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Compare-branches preview ────────────────────────────────────── */
+function MockMiniMessage({ role, text, isCompare }) {
+  const isAssistant = role === 'assistant';
+  return (
+    <div style={{ display: 'flex', gap: '6px', alignItems: 'flex-start' }}>
+      <div
+        style={{
+          width: 16,
+          height: 16,
+          flexShrink: 0,
+          background: isAssistant
+            ? isCompare ? SPLIT_COLOR : 'var(--color-accent)'
+            : 'var(--color-bg-alt)',
+          border: '1px solid',
+          borderColor: isAssistant
+            ? isCompare ? SPLIT_COLOR : 'var(--color-accent)'
+            : 'var(--color-border)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        {isAssistant
+          ? <Robot size={8} color="#fff" />
+          : <User size={8} color="var(--color-text-secondary)" />}
+      </div>
+      <div
+        style={{
+          flex: 1,
+          fontSize: '0.655rem',
+          color: 'var(--color-text-secondary)',
+          lineHeight: 1.45,
+          wordBreak: 'break-word',
+          overflow: 'hidden',
+        }}
+      >
+        {text}
+      </div>
+    </div>
+  );
+}
+
+function MockComparePreview() {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        height: '100%',
+        border: '1px solid var(--color-border)',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Path A — active */}
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          background: 'var(--color-bg-alt)',
+          overflow: 'hidden',
+          minWidth: 0,
+        }}
+      >
+        <div
+          style={{
+            flexShrink: 0,
+            height: '34px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '0 10px',
+            borderBottom: '1px solid var(--color-border)',
+          }}
+        >
+          <div
+            style={{
+              width: 7,
+              height: 7,
+              background: 'var(--color-accent)',
+              borderRadius: '50%',
+              flexShrink: 0,
+            }}
+          />
+          <span
+            style={{
+              fontSize: '0.585rem',
+              fontWeight: 600,
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              color: 'var(--color-text-tertiary)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Path A · Active
+          </span>
+        </div>
+        <div
+          style={{
+            flex: 1,
+            padding: '10px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '9px',
+            overflow: 'hidden',
+          }}
+        >
+          <MockMiniMessage role="user" text="What is machine learning?" />
+          <MockMiniMessage role="assistant" text="Machine learning is a field of AI focused on learning from data and improving over time…" />
+          <MockMiniMessage role="user" text="Tell me about neural networks" />
+          <MockMiniMessage role="assistant" text="Neural networks are computational models loosely inspired by the structure of the brain…" />
+        </div>
+      </div>
+
+      {/* Divider */}
+      <div style={{ width: '2px', background: `${SPLIT_COLOR}66`, flexShrink: 0 }} />
+
+      {/* Path B — compare */}
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          background: SPLIT_COLOR_BG,
+          overflow: 'hidden',
+          minWidth: 0,
+        }}
+      >
+        <div
+          style={{
+            flexShrink: 0,
+            height: '34px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '0 10px',
+            borderBottom: `1px solid ${SPLIT_COLOR_BORDER}`,
+          }}
+        >
+          <div
+            style={{
+              width: 7,
+              height: 7,
+              background: SPLIT_COLOR,
+              borderRadius: '50%',
+              flexShrink: 0,
+            }}
+          />
+          <span
+            style={{
+              fontSize: '0.585rem',
+              fontWeight: 600,
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              color: SPLIT_COLOR,
+              opacity: 0.85,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Path B · Compare
+          </span>
+        </div>
+        <div
+          style={{
+            flex: 1,
+            padding: '10px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '9px',
+            overflow: 'hidden',
+          }}
+        >
+          <MockMiniMessage role="user" text="What is machine learning?" />
+          <MockMiniMessage role="assistant" text="Machine learning is a field of AI focused on learning from data and improving over time…" isCompare />
+          <MockMiniMessage role="user" text="Show me a Python example" />
+          <MockMiniMessage role="assistant" text="Here's a simple example using scikit-learn: from sklearn.linear_model import…" isCompare />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── Main tutorial modal ─────────────────────────────────────────── */
 export default function TutorialModal({ open, onClose }) {
   const [step, setStep] = useState(0);
@@ -542,7 +920,7 @@ export default function TutorialModal({ open, onClose }) {
                 {current.body}
               </p>
 
-              {/* Branch button visual (step 2 only) */}
+              {/* Branch button hint (step 3) */}
               {current.showBranchHint && (
                 <div
                   style={{
@@ -585,6 +963,7 @@ export default function TutorialModal({ open, onClose }) {
                   </div>
                 </div>
               )}
+
             </div>
 
             {/* Navigation */}
@@ -736,25 +1115,82 @@ export default function TutorialModal({ open, onClose }) {
               Live preview
             </div>
 
-            {/* Tree panel replica */}
+            {/* Preview — switches based on step type */}
             <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-              <TreePreview step={current} />
+              {current.showType === 'highlight' ? (
+                <MockHighlightPreview />
+              ) : current.showType === 'compare' ? (
+                <MockComparePreview />
+              ) : (
+                <TreePreview step={current} />
+              )}
             </div>
 
-            {/* Path legend */}
-            <div
-              style={{
-                display: 'flex',
-                gap: '1.25rem',
-                marginTop: 'var(--space-3)',
-                paddingTop: 'var(--space-3)',
-                borderTop: '1px solid var(--color-border)',
-              }}
-            >
-              <LegendItem color="var(--color-accent)" label="Active turn" solid />
-              <LegendItem color="var(--color-accent)" label="Active path" />
-              <LegendItem color="var(--color-border-strong)" label="Other branches" />
-            </div>
+            {/* Tree legend — only for tree steps */}
+            {current.showType === 'tree' && (
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '1.25rem',
+                  marginTop: 'var(--space-3)',
+                  paddingTop: 'var(--space-3)',
+                  borderTop: '1px solid var(--color-border)',
+                }}
+              >
+                <LegendItem color="var(--color-accent)" label="Active turn" solid />
+                <LegendItem color="var(--color-accent)" label="Active path" />
+                <LegendItem color="var(--color-border-strong)" label="Other branches" />
+              </div>
+            )}
+
+            {/* Highlight legend */}
+            {current.showType === 'highlight' && (
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '1.25rem',
+                  marginTop: 'var(--space-3)',
+                  paddingTop: 'var(--space-3)',
+                  borderTop: '1px solid var(--color-border)',
+                  alignItems: 'center',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <mark
+                    style={{
+                      background: 'color-mix(in srgb, var(--color-accent) 28%, transparent)',
+                      borderBottom: '1.5px solid color-mix(in srgb, var(--color-accent) 70%, transparent)',
+                      borderRadius: '2px',
+                      padding: '0 5px',
+                      fontSize: '0.6875rem',
+                      color: 'var(--color-text-tertiary)',
+                    }}
+                  >
+                    selected
+                  </mark>
+                  <span style={{ fontSize: '0.6875rem', fontWeight: 300, color: 'var(--color-text-tertiary)', letterSpacing: '0.02em' }}>
+                    Highlighted selection
+                  </span>
+                </div>
+                <LegendItem color="var(--color-accent)" label="Branch popover" />
+              </div>
+            )}
+
+            {/* Compare legend */}
+            {current.showType === 'compare' && (
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '1.25rem',
+                  marginTop: 'var(--space-3)',
+                  paddingTop: 'var(--space-3)',
+                  borderTop: '1px solid var(--color-border)',
+                }}
+              >
+                <LegendItem color="var(--color-accent)" label="Your active path" />
+                <LegendItem color={SPLIT_COLOR} label="Compared path" />
+              </div>
+            )}
           </div>
         </div>
       </div>

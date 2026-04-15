@@ -2,17 +2,17 @@ import { useMemo, useCallback, memo } from 'react';
 import { useConversation } from '../../context/ConversationContext';
 import { stripTopicBlockForDisplay } from '../../lib/topicMetadata';
 
-/**
- * One tree node = one conversation turn (user message + assistant reply).
- * Cards show "Turn N" and a topic label from model metadata on the assistant message.
- */
-
 const NODE_W = 172;
 const NODE_H = 64;
 const GAP_X = 14;
 const GAP_Y = 38;
 
-/** Build nested turn tree from message graph (root = first user). */
+// Sober red for the split path
+export const SPLIT_COLOR = '#a03434';
+const SPLIT_COLOR_CONNECTOR = 'rgba(160, 52, 52, 0.55)';
+const SPLIT_COLOR_BORDER = 'rgba(160, 52, 52, 0.7)';
+const SPLIT_COLOR_BG = 'rgba(160, 52, 52, 0.07)';
+
 function buildTurnTree(nodes, rootUserId) {
   function walk(userId, turnNumber) {
     const user = nodes[userId];
@@ -46,16 +46,6 @@ function computeTurnLayout(turnRoot) {
   const positions = {};
   let maxY = 0;
 
-  /**
-   * Lay out subtree rooted at `turn` with first child starting at x.
-   * Returns { width } where width is the horizontal extent from x to the subtree's right edge
-   * (so siblings can be placed without overlapping).
-   *
-   * Parent cards are centered on the midpoint between the leftmost and rightmost *child card
-   * centers*. The old formula (x + childrenEnd - NODE_W) / 2 used subtree bounding widths,
-   * which mis-centers parents when child subtrees have different sizes — connectors then missed
-   * the horizontal center of the cards.
-   */
   function layout(turn, x, y) {
     const children = turn.children || [];
     if (children.length === 0) {
@@ -119,33 +109,29 @@ function collectTurns(turn, acc = []) {
   return acc;
 }
 
-/** Orthogonal (square-corner) link: parent bottom-center → elbow → child top-center. */
-function Connector({ fromX, fromY, toX, toY, isActive }) {
+function Connector({ fromX, fromY, toX, toY, isActive, isSplit }) {
   const x1 = fromX + NODE_W / 2;
   const y1 = fromY + NODE_H;
   const x2 = toX + NODE_W / 2;
   const y2 = toY;
-  // Anchor directly to card edges so connectors visibly attach at each card's center.
-  const yStart = y1;
-  const yEnd = y2;
-  const midY = (yStart + yEnd) / 2;
-  const d = `M ${x1} ${yStart} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${yEnd}`;
+  const midY = (y1 + y2) / 2;
+  const d = `M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`;
   return (
     <path
       d={d}
       fill="none"
-      stroke={isActive ? 'var(--color-accent-dim)' : 'var(--color-border)'}
-      strokeWidth={isActive ? 2.75 : 2}
+      stroke={isSplit ? SPLIT_COLOR_CONNECTOR : isActive ? 'var(--color-accent-dim)' : 'var(--color-border)'}
+      strokeWidth={isSplit || isActive ? 2.75 : 2}
       strokeLinecap="square"
       strokeLinejoin="miter"
       strokeMiterlimit={2}
-      opacity={isActive ? 0.9 : 0.55}
+      opacity={isSplit ? 0.8 : isActive ? 0.9 : 0.55}
     />
   );
 }
 
 const TurnCard = memo(
-  ({ turn, x, y, nodes, isActive, isOnPath, streamingNodeId, streamingContent, onClick }) => {
+  ({ turn, x, y, nodes, isActive, isOnPath, isSplitPath, streamingNodeId, streamingContent, onClick, onLeafDragStart, onLeafDragEnd }) => {
     const assistant = turn.assistantId ? nodes[turn.assistantId] : null;
     const streamingHere = turn.assistantId && turn.assistantId === streamingNodeId;
 
@@ -162,10 +148,36 @@ const TurnCard = memo(
         (assistant.content ? assistant.content.replace(/\s+/g, ' ').trim().slice(0, 56) : '…');
     }
 
+    const canDrag = !!turn.assistantId;
+
+    let bg = 'var(--color-surface)';
+    let borderColor = 'var(--color-border)';
+    let borderLeft;
+
+    if (isActive) {
+      bg = 'var(--color-accent)';
+      borderColor = 'var(--color-accent)';
+    } else if (isSplitPath) {
+      bg = SPLIT_COLOR_BG;
+      borderColor = SPLIT_COLOR_BORDER;
+      borderLeft = `3px solid ${SPLIT_COLOR}`;
+    } else if (isOnPath) {
+      bg = 'var(--color-bg-alt)';
+      borderColor = 'var(--color-border-strong)';
+      borderLeft = '3px solid var(--color-accent)';
+    }
+
     return (
       <div
         role="button"
         tabIndex={0}
+        draggable={canDrag}
+        onDragStart={canDrag ? (e) => {
+          e.dataTransfer.setData('grove/leaf', turn.assistantId);
+          e.dataTransfer.effectAllowed = 'copy';
+          onLeafDragStart?.(turn.assistantId);
+        } : undefined}
+        onDragEnd={canDrag ? () => onLeafDragEnd?.() : undefined}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
@@ -173,7 +185,7 @@ const TurnCard = memo(
           }
         }}
         onClick={() => onClick(turn)}
-        title={topicLine}
+        title={canDrag ? `${topicLine} — drag to compare` : topicLine}
         style={{
           position: 'absolute',
           left: x,
@@ -181,18 +193,10 @@ const TurnCard = memo(
           width: NODE_W,
           minHeight: NODE_H,
           boxSizing: 'border-box',
-          background: isActive
-            ? 'var(--color-accent)'
-            : isOnPath
-              ? 'var(--color-bg-alt)'
-              : 'var(--color-surface)',
+          background: bg,
           border: '1px solid',
-          borderColor: isActive
-            ? 'var(--color-accent)'
-            : isOnPath
-              ? 'var(--color-border-strong)'
-              : 'var(--color-border)',
-          borderLeft: isOnPath && !isActive ? '3px solid var(--color-accent)' : undefined,
+          borderColor,
+          borderLeft,
           cursor: 'pointer',
           display: 'flex',
           flexDirection: 'column',
@@ -200,7 +204,7 @@ const TurnCard = memo(
           padding: '6px 10px',
           gap: '4px',
           transition: 'background 0.15s ease, border-color 0.15s ease, transform 0.1s ease',
-          boxShadow: isActive ? '0 2px 12px rgba(61,90,71,0.18)' : 'none',
+          boxShadow: isActive ? '0 2px 12px rgba(61,90,71,0.18)' : isSplitPath ? '0 2px 8px rgba(160,52,52,0.12)' : 'none',
         }}
         onMouseEnter={(e) => {
           if (!isActive) e.currentTarget.style.transform = 'translateY(-1px)';
@@ -215,7 +219,7 @@ const TurnCard = memo(
             fontWeight: 600,
             letterSpacing: '0.1em',
             textTransform: 'uppercase',
-            color: isActive ? 'rgba(255,255,255,0.85)' : 'var(--color-text-tertiary)',
+            color: isActive ? 'rgba(255,255,255,0.85)' : isSplitPath ? SPLIT_COLOR : 'var(--color-text-tertiary)',
             lineHeight: 1.2,
           }}
         >
@@ -244,7 +248,7 @@ const TurnCard = memo(
 
 TurnCard.displayName = 'TurnCard';
 
-export default function TreeCanvas() {
+export default function TreeCanvas({ splitLeafId, onLeafDragStart, onLeafDragEnd }) {
   const {
     nodes,
     rootId,
@@ -270,6 +274,11 @@ export default function TreeCanvas() {
   const activePathIds = useMemo(
     () => getActivePathIds(nodes, activeLeafId),
     [nodes, activeLeafId],
+  );
+
+  const splitPathIds = useMemo(
+    () => (splitLeafId ? getActivePathIds(nodes, splitLeafId) : new Set()),
+    [nodes, splitLeafId],
   );
 
   const allTurns = useMemo(() => collectTurns(turnRoot, []), [turnRoot]);
@@ -353,6 +362,10 @@ export default function TreeCanvas() {
             const isActive =
               isTurnOnActivePath(turn, activePathIds) &&
               isTurnOnActivePath(child, activePathIds);
+            const isSplit =
+              !isActive &&
+              isTurnOnActivePath(turn, splitPathIds) &&
+              isTurnOnActivePath(child, splitPathIds);
             return (
               <Connector
                 key={`${turn.id}-${child.id}`}
@@ -361,6 +374,7 @@ export default function TreeCanvas() {
                 toX={c.x}
                 toY={c.y}
                 isActive={isActive}
+                isSplit={isSplit}
               />
             );
           }),
@@ -371,6 +385,8 @@ export default function TreeCanvas() {
         {allTurns.map((turn) => {
           const pos = positions[turn.id];
           if (!pos) return null;
+          const isOnActivePath = isTurnOnActivePath(turn, activePathIds);
+          const isOnSplitPath = !isOnActivePath && isTurnOnActivePath(turn, splitPathIds);
           return (
             <TurnCard
               key={turn.id}
@@ -379,10 +395,13 @@ export default function TreeCanvas() {
               y={pos.y}
               nodes={nodes}
               isActive={isTurnActiveLeaf(turn, activeLeafId)}
-              isOnPath={isTurnOnActivePath(turn, activePathIds)}
+              isOnPath={isOnActivePath}
+              isSplitPath={isOnSplitPath}
               streamingNodeId={streamingNodeId}
               streamingContent={streamingContent}
               onClick={handleTurnClick}
+              onLeafDragStart={onLeafDragStart}
+              onLeafDragEnd={onLeafDragEnd}
             />
           );
         })}

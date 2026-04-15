@@ -21,9 +21,24 @@ function readFileAsBase64(file) {
   });
 }
 
-const InputBar = forwardRef(function InputBar(_props, ref) {
-  const { sendMessage, isStreaming, abortStreaming, activeLeafId, nodes, keyMode, sessionTokensUsed } = useConversation();
+/**
+ * overrideLeafId      – when set, replaces activeLeafId for focus tracking and
+ *                       branch-point detection (used by the split panel).
+ * onSend              – if provided, called instead of the context sendMessage.
+ *                       Receives (content, images).
+ * autoFocusAfterStream – if false, the textarea won't grab focus when streaming
+ *                       finishes (prevents the split panel from stealing focus
+ *                       when the main panel's stream ends).
+ */
+const InputBar = forwardRef(function InputBar(
+  { overrideLeafId = null, onSend = null, autoFocusAfterStream = true },
+  ref,
+) {
+  const { sendMessage: ctxSendMessage, isStreaming, abortStreaming, activeLeafId, nodes, keyMode, sessionTokensUsed } = useConversation();
   const { isLoggedIn, tokensRemaining, isAtTokenLimit, tokenLimit } = useAuth();
+
+  const sendFn = onSend ?? ctxSendMessage;
+  const effectiveLeafId = overrideLeafId ?? activeLeafId;
 
   const enforceLimit = isLoggedIn && isAtTokenLimit && keyMode === 'credits';
   const [value, setValue] = useState('');
@@ -42,9 +57,10 @@ const InputBar = forwardRef(function InputBar(_props, ref) {
 
   useEffect(() => {
     textareaRef.current?.focus();
-  }, [activeLeafId]);
+  }, [effectiveLeafId]);
 
   useEffect(() => {
+    if (!autoFocusAfterStream) return;
     if (isStreaming) {
       hadStreamingTurnRef.current = true;
       return;
@@ -56,7 +72,7 @@ const InputBar = forwardRef(function InputBar(_props, ref) {
       textareaRef.current?.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(id);
-  }, [isStreaming, enforceLimit]);
+  }, [isStreaming, enforceLimit, autoFocusAfterStream]);
 
   const addImages = useCallback(async (files) => {
     const imageFiles = Array.from(files)
@@ -75,11 +91,11 @@ const InputBar = forwardRef(function InputBar(_props, ref) {
 
   const handleSend = useCallback(() => {
     if (!canSend) return;
-    sendMessage(value.trim(), images);
+    sendFn(value.trim(), images);
     setValue('');
     setImages([]);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-  }, [value, images, canSend, sendMessage]);
+  }, [value, images, canSend, sendFn]);
 
   function handleKeyDown(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -109,7 +125,7 @@ const InputBar = forwardRef(function InputBar(_props, ref) {
     e.target.value = '';
   }
 
-  const activeNode = activeLeafId && nodes[activeLeafId];
+  const activeNode = effectiveLeafId && nodes[effectiveLeafId];
   const isBranchPoint = activeNode && activeNode.children && activeNode.children.length > 0;
 
   const containerBorderColor = isDragging
@@ -274,7 +290,6 @@ const InputBar = forwardRef(function InputBar(_props, ref) {
           </button>
 
           <textarea
-            id="chat-input"
             ref={textareaRef}
             value={value}
             onChange={(e) => setValue(e.target.value)}

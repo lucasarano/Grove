@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { SPLIT_COLOR } from './components/TreePanel/TreeCanvas';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ConversationProvider } from './context/ConversationContext';
 import Header from './components/Header';
@@ -19,6 +20,9 @@ const DEFAULT_TREE_FRACTION = 0.32;
 const TUTORIAL_SEEN_STORAGE_KEY = 'grove:onboarding-seen-v1';
 const TUTORIAL_SEEN_LEGACY_KEY = 'grove:tutorial-seen';
 
+// Width of the tree panel when visually collapsed (header-only)
+const TREE_COLLAPSED_PX = 110;
+
 function MainLayout() {
   const layoutRef = useRef(null);
   const [treeWidth, setTreeWidth] = useState(() =>
@@ -27,6 +31,19 @@ function MainLayout() {
       : 400,
   );
   const [dragging, setDragging] = useState(false);
+  const [treeHidden, setTreeHidden] = useState(false);
+
+  // Split view: leafId of the pinned second panel
+  const [splitLeafId, setSplitLeafId] = useState(null);
+  // Split panel width as a fraction of the chat area (0.5 = equal halves)
+  const [splitFraction, setSplitFraction] = useState(0.5);
+  const [splitDragging, setSplitDragging] = useState(false);
+  // True while a turn card is being dragged from the tree
+  const [isLeafDragging, setIsLeafDragging] = useState(false);
+  // True while the drag is hovering over the primary chat area drop zone
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  const chatAreaRef = useRef(null);
 
   const clampTreeWidth = useCallback((next, total) => {
     const maxTree = Math.max(MIN_TREE_PX, total - MIN_CHAT_PX);
@@ -52,7 +69,11 @@ function MainLayout() {
       if (!el) return;
       const rect = el.getBoundingClientRect();
       const next = rect.right - e.clientX;
-      setTreeWidth(clampTreeWidth(next, rect.width));
+      const clamped = clampTreeWidth(next, rect.width);
+      setTreeWidth(clamped);
+      // Auto-show when dragged past the collapsed threshold; auto-hide when dragged below it
+      if (clamped > TREE_COLLAPSED_PX + 20) setTreeHidden(false);
+      else if (clamped <= TREE_COLLAPSED_PX + 20) setTreeHidden(true);
     };
 
     const onUp = () => setDragging(false);
@@ -70,6 +91,44 @@ function MainLayout() {
     };
   }, [dragging, clampTreeWidth]);
 
+  useEffect(() => {
+    if (!splitDragging) return undefined;
+
+    const onMove = (e) => {
+      const el = chatAreaRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const MIN_PX = 220;
+      const raw = (e.clientX - rect.left) / rect.width;
+      const minFrac = MIN_PX / rect.width;
+      const maxFrac = 1 - minFrac;
+      setSplitFraction(Math.min(maxFrac, Math.max(minFrac, raw)));
+    };
+
+    const onUp = () => setSplitDragging(false);
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [splitDragging]);
+
+  const handleLeafDragStart = useCallback(() => setIsLeafDragging(true), []);
+  const handleLeafDragEnd   = useCallback(() => {
+    setIsLeafDragging(false);
+    setIsDragOver(false);
+  }, []);
+
+  const effectiveTreeWidth = treeHidden ? TREE_COLLAPSED_PX : treeWidth;
+  const inSplitView = !!splitLeafId;
+
   return (
     <div
       ref={layoutRef}
@@ -80,9 +139,94 @@ function MainLayout() {
         minHeight: 0,
       }}
     >
-      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        <ChatPanel />
+      {/* ── Chat area (primary + optional split panel) ── */}
+      <div ref={chatAreaRef} style={{ flex: 1, minWidth: 0, overflow: 'hidden', display: 'flex' }}>
+
+        {/* Primary chat panel */}
+        <div
+          style={{
+            flexShrink: 0,
+            width: inSplitView ? `${splitFraction * 100}%` : '100%',
+            minWidth: 0,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            position: 'relative',
+          }}
+          onDragOver={isLeafDragging && !inSplitView ? (e) => { e.preventDefault(); setIsDragOver(true); } : undefined}
+          onDragLeave={isLeafDragging && !inSplitView ? (e) => {
+            if (!e.currentTarget.contains(e.relatedTarget)) setIsDragOver(false);
+          } : undefined}
+          onDrop={isLeafDragging && !inSplitView ? (e) => {
+            e.preventDefault();
+            const leafId = e.dataTransfer.getData('grove/leaf');
+            if (leafId) setSplitLeafId(leafId);
+            setIsDragOver(false);
+            setIsLeafDragging(false);
+          } : undefined}
+        >
+          {/* Drop-to-compare overlay */}
+          {isLeafDragging && !inSplitView && (
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                zIndex: 100,
+                background: isDragOver ? 'rgba(160,52,52,0.10)' : 'rgba(160,52,52,0.04)',
+                border: `2px dashed ${isDragOver ? SPLIT_COLOR : 'rgba(160,52,52,0.35)'}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                pointerEvents: 'none',
+                transition: 'background 0.15s ease, border-color 0.15s ease',
+              }}
+            >
+              <span style={{
+                color: SPLIT_COLOR,
+                fontSize: '0.8125rem',
+                fontWeight: 500,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                fontFamily: 'var(--font-body)',
+                opacity: isDragOver ? 1 : 0.6,
+              }}>
+                Drop to compare
+              </span>
+            </div>
+          )}
+
+          <ChatPanel colorMarker={inSplitView ? 'var(--color-accent)' : null} />
+        </div>
+
+        {/* Split panel */}
+        {inSplitView && (
+          <>
+            {/* Draggable split divider */}
+            <div
+              onMouseDown={(e) => { e.preventDefault(); setSplitDragging(true); }}
+              style={{
+                flexShrink: 0,
+                width: 6,
+                background: splitDragging ? 'var(--color-border-strong)' : 'var(--color-border-strong)',
+                cursor: 'col-resize',
+                transition: splitDragging ? 'none' : 'background 0.15s ease',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-accent-dim)'; }}
+              onMouseLeave={(e) => { if (!splitDragging) e.currentTarget.style.background = 'var(--color-border-strong)'; }}
+            />
+            <div style={{ flex: 1, minWidth: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <ChatPanel
+                pinnedLeafId={splitLeafId}
+                colorMarker={SPLIT_COLOR}
+                onClose={() => setSplitLeafId(null)}
+                onSplitLeafChange={setSplitLeafId}
+              />
+            </div>
+          </>
+        )}
       </div>
+
+      {/* ── Tree resize divider (always present so hidden tree can be dragged open) ── */}
       <button
         type="button"
         aria-label="Resize conversation tree panel"
@@ -108,18 +252,27 @@ function MainLayout() {
           if (!dragging) e.currentTarget.style.background = 'transparent';
         }}
       />
+
+      {/* ── Tree panel ── */}
       <div
         style={{
-          flex: `0 0 ${treeWidth}px`,
-          width: treeWidth,
+          flex: `0 0 ${effectiveTreeWidth}px`,
+          width: effectiveTreeWidth,
           minWidth: 0,
           maxWidth: '100%',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
+          borderLeft: treeHidden ? '1px solid var(--color-border)' : 'none',
         }}
       >
-        <TreePanel />
+        <TreePanel
+          treeHidden={treeHidden}
+          onToggleTree={() => setTreeHidden((h) => !h)}
+          splitLeafId={splitLeafId}
+          onLeafDragStart={handleLeafDragStart}
+          onLeafDragEnd={handleLeafDragEnd}
+        />
       </div>
     </div>
   );

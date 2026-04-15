@@ -51,12 +51,14 @@ function CopyButton({ text }) {
 
 // ─── CodeBlock ───────────────────────────────────────────────────────
 
+// High-contrast palette — all token colors are bright enough to read
+// clearly against the #0d1117 background.
 const codeStyle = {
   'code[class*="language-"]': {
     fontFamily: "'Menlo', 'Monaco', 'Courier New', monospace",
     fontSize: '0.875rem',
     lineHeight: 1.65,
-    color: '#e2e8f0',
+    color: '#cdd9e5',   // base text: bright-ish blue-grey
     background: 'none',
   },
   'pre[class*="language-"]': {
@@ -65,39 +67,43 @@ const codeStyle = {
     padding: 0,
     overflow: 'auto',
   },
-  comment: { color: '#64748b', fontStyle: 'italic' },
-  prolog: { color: '#64748b' },
-  doctype: { color: '#64748b' },
-  cdata: { color: '#64748b' },
-  punctuation: { color: '#94a3b8' },
-  property: { color: '#7dd3fc' },
-  tag: { color: '#f87171' },
-  boolean: { color: '#fb923c' },
-  number: { color: '#fb923c' },
-  constant: { color: '#7dd3fc' },
-  symbol: { color: '#34d399' },
-  deleted: { color: '#f87171' },
-  selector: { color: '#86efac' },
-  'attr-name': { color: '#7dd3fc' },
-  string: { color: '#86efac' },
-  char: { color: '#86efac' },
-  builtin: { color: '#c084fc' },
-  inserted: { color: '#86efac' },
-  operator: { color: '#94a3b8' },
-  entity: { color: '#fbbf24', cursor: 'help' },
-  url: { color: '#7dd3fc' },
-  variable: { color: '#e2e8f0' },
-  atrule: { color: '#c084fc' },
-  'attr-value': { color: '#86efac' },
-  function: { color: '#38bdf8' },
-  'function-variable': { color: '#38bdf8' },
-  keyword: { color: '#c084fc' },
-  regex: { color: '#fbbf24' },
-  important: { color: '#fbbf24', fontWeight: 'bold' },
-  bold: { fontWeight: 'bold' },
-  italic: { fontStyle: 'italic' },
+  comment:     { color: '#768390', fontStyle: 'italic' },
+  prolog:      { color: '#768390' },
+  doctype:     { color: '#768390' },
+  cdata:       { color: '#768390' },
+  punctuation: { color: '#adbac7' },
+  property:    { color: '#f47067' },   // bright coral-red
+  tag:         { color: '#f47067' },
+  boolean:     { color: '#f69d50' },   // bright amber
+  number:      { color: '#f69d50' },
+  constant:    { color: '#f69d50' },
+  symbol:      { color: '#f69d50' },
+  deleted:     { color: '#f47067' },
+  selector:    { color: '#8ddb8c' },   // bright green
+  'attr-name': { color: '#f69d50' },
+  string:      { color: '#96d0ff' },   // bright sky blue (easier to read than green on dark)
+  char:        { color: '#96d0ff' },
+  builtin:     { color: '#6bc8d4' },   // bright teal
+  inserted:    { color: '#8ddb8c' },
+  operator:    { color: '#adbac7' },
+  entity:      { color: '#f69d50', cursor: 'help' },
+  url:         { color: '#6bc8d4' },
+  variable:    { color: '#cdd9e5' },
+  atrule:      { color: '#dcbdfb' },   // bright lavender
+  'attr-value':{ color: '#96d0ff' },
+  function:    { color: '#85c1f5' },   // bright calm blue
+  'function-variable': { color: '#85c1f5' },
+  keyword:     { color: '#dcbdfb' },
+  regex:       { color: '#6bc8d4' },
+  important:   { color: '#f47067', fontWeight: 'bold' },
+  bold:        { fontWeight: 'bold' },
+  italic:      { fontStyle: 'italic' },
 };
 
+// CodeBlock is used both for inline `code` and fenced ``` blocks.
+// ReactMarkdown v8+ passes inline=true for backtick spans; for fenced blocks
+// it renders <pre><code> and our custom `pre` wrapper hands the node straight
+// to this component with inline=false.
 function CodeBlock({ inline, className, children }) {
   const match = /language-(\w+)/.exec(className || '');
   const lang = match ? match[1] : '';
@@ -106,13 +112,13 @@ function CodeBlock({ inline, className, children }) {
   if (inline) {
     return (
       <code style={{
-        fontFamily: "'Menlo', 'Monaco', monospace",
-        fontSize: '0.875em',
-        background: 'var(--color-bg-alt)',
+        fontFamily: "'Menlo', 'Monaco', 'Courier New', monospace",
+        fontSize: '0.8em',
+        background: 'rgba(148,163,184,0.12)',
         padding: '0.15em 0.4em',
-        borderRadius: 2,
-        border: '1px solid var(--color-border)',
+        borderRadius: 4,
         color: 'var(--color-text-primary)',
+        letterSpacing: '-0.01em',
       }}>
         {children}
       </code>
@@ -121,45 +127,56 @@ function CodeBlock({ inline, className, children }) {
 
   return (
     <div style={{
-      background: '#0f172a',
-      borderRadius: 0,
-      margin: 'var(--space-2) 0',
+      background: '#0d1117',
+      borderRadius: 8,
+      margin: '1rem 0',
       overflow: 'hidden',
-      border: '1px solid rgba(255,255,255,0.08)',
+      border: '1px solid rgba(255,255,255,0.07)',
+      color: '#cdd9e5',   // reset inherited prose color for all children
     }}>
+      {/* toolbar */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '0.4rem 0.75rem',
-        background: '#1e293b',
-        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        padding: '0.35rem 0.875rem',
+        borderBottom: '1px solid rgba(255,255,255,0.05)',
+        background: 'rgba(255,255,255,0.02)',
       }}>
         <span style={{
           fontSize: '0.7rem',
           fontFamily: "'Menlo', 'Monaco', monospace",
-          color: 'rgba(255,255,255,0.4)',
+          color: 'rgba(255,255,255,0.3)',
           letterSpacing: '0.06em',
-          textTransform: 'lowercase',
         }}>
           {lang || 'code'}
         </span>
         <CopyButton text={code} />
       </div>
-      <div style={{ padding: '0.875rem 1rem', overflowX: 'auto' }}>
+
+      {/* body */}
+      <div className="code-block-body" style={{ padding: '1rem', overflowX: 'auto' }}>
         {lang ? (
           <SyntaxHighlighter
             language={lang}
             style={codeStyle}
             PreTag="div"
             customStyle={{ margin: 0, background: 'none', padding: 0 }}
-            codeTagProps={{ style: { fontFamily: "'Menlo', 'Monaco', monospace", fontSize: '0.875rem', lineHeight: 1.65 } }}
+            codeTagProps={{ style: {
+              fontFamily: "'Menlo', 'Monaco', 'Courier New', monospace",
+              fontSize: '0.875rem',
+              lineHeight: 1.7,
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              color: '#cdd9e5',   // unclassed tokens inherit this instead of dark prose color
+            } }}
           >
             {code}
           </SyntaxHighlighter>
         ) : (
-          <pre style={{ margin: 0, fontFamily: "'Menlo', 'Monaco', monospace", fontSize: '0.875rem', lineHeight: 1.65, color: '#e2e8f0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            <code>{code}</code>
+          <pre style={{ margin: 0, fontFamily: "'Menlo', 'Monaco', 'Courier New', monospace", fontSize: '0.875rem', lineHeight: 1.7, color: '#abb2bf', whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: 'none' }}>
+            <code style={{ background: 'none', border: 'none', padding: 0 }}>{code}</code>
           </pre>
         )}
       </div>
@@ -167,7 +184,35 @@ function CodeBlock({ inline, className, children }) {
   );
 }
 
+// Custom `pre` strips the default <pre> wrapper ReactMarkdown adds around
+// fenced code blocks — CodeBlock renders its own container div.
+function PreBlock({ children }) {
+  // Unwrap the single <code> child so CodeBlock receives inline=false.
+  const child = Array.isArray(children) ? children[0] : children;
+  if (child?.type === CodeBlock || child?.props?.className?.startsWith('language-')) {
+    return <>{children}</>;
+  }
+  // Fallback: render as a plain pre for any other pre-wrapped content.
+  return (
+    <pre style={{
+      margin: '1rem 0',
+      padding: '1rem',
+      background: '#0d1117',
+      borderRadius: 8,
+      border: '1px solid rgba(255,255,255,0.07)',
+      overflowX: 'auto',
+      fontFamily: "'Menlo', 'Monaco', 'Courier New', monospace",
+      fontSize: '0.875rem',
+      lineHeight: 1.7,
+      color: '#cbd5e1',
+    }}>
+      {children}
+    </pre>
+  );
+}
+
 const MD_COMPONENTS = {
+  pre: PreBlock,
   code: CodeBlock,
 };
 
@@ -248,11 +293,9 @@ function SelectionBranchPopover({ selection, onBranch, onDismiss }) {
   const inputRef = useRef(null);
   const popoverRef = useRef(null);
 
-  // Focus the input when the popover appears
-  useEffect(() => {
-    const id = requestAnimationFrame(() => inputRef.current?.focus());
-    return () => cancelAnimationFrame(id);
-  }, []);
+  // Do NOT auto-focus — stealing focus drops the browser's text selection,
+  // which the user may still want to read or copy.  They can click the input
+  // to start typing their branch prompt.
 
   // Dismiss on click-outside or Escape
   useEffect(() => {
@@ -304,11 +347,10 @@ function SelectionBranchPopover({ selection, onBranch, onDismiss }) {
     maxWidth: 480,
   };
 
-  const excerptStyle = {
-    fontSize: '0.7rem',
+  const excerptRowStyle = {
+    fontSize: '0.75rem',
     fontWeight: 400,
-    color: 'var(--color-text-tertiary)',
-    letterSpacing: '0.02em',
+    letterSpacing: '0.01em',
     marginBottom: '0.4rem',
     whiteSpace: 'nowrap',
     overflow: 'hidden',
@@ -323,22 +365,26 @@ function SelectionBranchPopover({ selection, onBranch, onDismiss }) {
   return createPortal(
     <div ref={popoverRef} style={style}>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-        <div style={excerptStyle}>Branch from {excerpt}</div>
+        <div style={excerptRowStyle}>
+          <span style={{ color: 'var(--color-accent)', fontWeight: 500 }}>Branch from </span>
+          <span style={{ color: 'var(--color-text-secondary)' }}>{excerpt}</span>
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <input
             ref={inputRef}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Enter branch prompt…"
+            className="branch-popover-input"
+            placeholder="Dig Deeper..."
             style={{
               flex: 1,
               background: 'transparent',
               border: 'none',
               outline: 'none',
               fontFamily: 'var(--font-body)',
-              fontSize: '0.9rem',
-              fontWeight: 300,
+              fontSize: '0.9375rem',
+              fontWeight: 400,
               color: 'var(--color-text-primary)',
               lineHeight: 1.5,
             }}
@@ -377,14 +423,21 @@ function SelectionBranchPopover({ selection, onBranch, onDismiss }) {
 
 // ─── MessageBubble ───────────────────────────────────────────────────
 
-function MessageBubble({ node, isStreaming = false, streamingContent = '' }) {
+/**
+ * onBranchNodeCreated – when set, branching from this bubble runs with
+ *   preserveActiveLeaf=true and calls onBranchNodeCreated(newNodeId) so the
+ *   split panel's leaf stays in sync without disturbing the main panel.
+ * panelLeafId – the "current leaf" for the panel this bubble lives in
+ *   (overrides the global activeLeafId for the isLeaf check).
+ */
+function MessageBubble({ node, isStreaming = false, streamingContent = '', onBranchNodeCreated = null, panelLeafId = null }) {
   const [hovered, setHovered] = useState(false);
   const [selectionPopover, setSelectionPopover] = useState(null);
   const messageRef = useRef(null);
   const branchButtonRef = useRef(null);
   const proseRef = useRef(null);
 
-  const { branchFrom, branchAndSend, navigateToBranchFrom, activeLeafId } = useConversation();
+  const { branchFrom, branchAndSend, navigateToBranchFrom, switchToBranch, activeLeafId, nodes } = useConversation();
 
   const isAssistant = node.role === 'assistant';
   const raw = isStreaming ? streamingContent : node.content;
@@ -395,7 +448,8 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '' }) {
     branchFrom(node.id);
   }
 
-  const shouldShowBranch = isAssistant && hovered && !isStreaming && node.id !== activeLeafId && !selectionPopover;
+  const effectivePanelLeafId = panelLeafId ?? activeLeafId;
+  const shouldShowBranch = isAssistant && hovered && !isStreaming && node.id !== effectivePanelLeafId && !selectionPopover;
 
   // ── Sticky branch-button position ────────────────────────────────
 
@@ -450,20 +504,44 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '' }) {
     if (!prose) return;
 
     const branches = node.selectionBranches || [];
+    const existingMarks = prose.querySelectorAll('mark[data-branch-id]');
 
-    // Remove any existing marks first so we don't double-wrap.
-    prose.querySelectorAll('mark[data-branch-id]').forEach((m) => {
-      m.parentNode.replaceChild(document.createTextNode(m.textContent), m);
-    });
-    prose.normalize();
+    // Nothing to do — skip entirely to avoid any chance of disturbing the DOM.
+    if (!branches.length && !existingMarks.length) return;
 
-    if (!branches.length) return;
-
-    for (const branch of branches) {
-      wrapTextInElement(prose, branch.text, branch.id, () => {
-        navigateRef.current(branch.childNodeId);
+    function applyMarks() {
+      // Re-query inside the deferred callback so we work on the current DOM.
+      const marks = prose.querySelectorAll('mark[data-branch-id]');
+      marks.forEach((m) => {
+        m.parentNode?.replaceChild(document.createTextNode(m.textContent), m);
       });
+      prose.normalize();
+
+      if (!branches.length) return;
+
+      for (const branch of branches) {
+        wrapTextInElement(prose, branch.text, branch.id, () => {
+          navigateRef.current(branch.childNodeId);
+        });
+      }
     }
+
+    // If the user has an active selection inside this prose block, any DOM
+    // mutation would silently drop it.  Defer one animation frame — by then
+    // the branch action will have cleared the selection and we can safely wrap.
+    let hasActiveSelectionHere = false;
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.rangeCount > 0) {
+      try { hasActiveSelectionHere = prose.contains(sel.getRangeAt(0).commonAncestorContainer); }
+      catch { /* ignore stale range errors */ }
+    }
+
+    if (hasActiveSelectionHere) {
+      const raf = requestAnimationFrame(applyMarks);
+      return () => cancelAnimationFrame(raf);
+    }
+
+    applyMarks();
   });
 
   // ── Text selection → popover ──────────────────────────────────────
@@ -489,7 +567,30 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '' }) {
   }
 
   function handleBranchFromSelection(prompt, selectedText) {
-    branchAndSend(node.id, prompt, selectedText);
+    // "Leaf" from this panel's perspective (panelLeafId overrides the global
+    // activeLeafId when this bubble is inside the split/compare panel).
+    const effectiveLeafId = panelLeafId ?? activeLeafId;
+    const isLeaf = node.id === effectiveLeafId;
+
+    // When this bubble lives in the split panel, route through preserveActiveLeaf
+    // so the main panel's view is never disturbed.
+    const branchOpts = onBranchNodeCreated
+      ? { preserveActiveLeaf: true, onNodeCreated: onBranchNodeCreated }
+      : {};
+
+    if (isLeaf) {
+      const parentUser = node.parentId ? nodes[node.parentId] : null;
+      const grandparentId = parentUser?.parentId ?? null;
+
+      if (grandparentId) {
+        branchAndSend(grandparentId, prompt, selectedText, node.id, branchOpts);
+      } else {
+        branchAndSend(node.id, prompt, selectedText, null, branchOpts);
+      }
+    } else {
+      branchAndSend(node.id, prompt, selectedText, null, branchOpts);
+    }
+
     setSelectionPopover(null);
     window.getSelection()?.removeAllRanges();
   }
@@ -556,19 +657,35 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '' }) {
           {isAssistant ? 'Assistant' : 'You'}
         </div>
 
-        {/* Selection quote (shown above user prompts branched from a highlight) */}
+        {/* Selection quote — clicking navigates back to the source assistant message */}
         {!isAssistant && node.selectionQuote && (
-          <div style={{
-            borderLeft: '2px solid var(--color-accent-dim)',
-            paddingLeft: '0.65rem',
-            marginBottom: '0.5rem',
-            color: 'var(--color-text-tertiary)',
-            fontSize: '0.875rem',
-            fontStyle: 'italic',
-            lineHeight: 1.5,
-            maxWidth: '680px',
-            wordBreak: 'break-word',
-          }}>
+          <div
+            onClick={node.selectionSourceNodeId ? () => switchToBranch(node.selectionSourceNodeId) : undefined}
+            title={node.selectionSourceNodeId ? 'Click to go back to the highlighted message' : undefined}
+            style={{
+              borderLeft: '2px solid var(--color-accent-dim)',
+              paddingLeft: '0.65rem',
+              marginBottom: '0.5rem',
+              color: 'var(--color-text-tertiary)',
+              fontSize: '0.875rem',
+              fontStyle: 'italic',
+              lineHeight: 1.5,
+              maxWidth: '680px',
+              wordBreak: 'break-word',
+              cursor: node.selectionSourceNodeId ? 'pointer' : 'default',
+              transition: 'color 0.15s ease, border-color 0.15s ease',
+            }}
+            onMouseEnter={(e) => {
+              if (!node.selectionSourceNodeId) return;
+              e.currentTarget.style.color = 'var(--color-accent)';
+              e.currentTarget.style.borderLeftColor = 'var(--color-accent)';
+            }}
+            onMouseLeave={(e) => {
+              if (!node.selectionSourceNodeId) return;
+              e.currentTarget.style.color = 'var(--color-text-tertiary)';
+              e.currentTarget.style.borderLeftColor = 'var(--color-accent-dim)';
+            }}
+          >
             &ldquo;{node.selectionQuote}&rdquo;
           </div>
         )}
