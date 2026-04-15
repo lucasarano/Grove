@@ -443,7 +443,7 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
    *   onNodeCreated – called with each newly created node id (user then assistant)
    *                   so the caller can track its own leaf independently.
    */
-  const sendMessage = useCallback(async (content, images = [], { fromNodeId = null, onNodeCreated = null } = {}) => {
+  const sendMessage = useCallback(async (content, images = [], { fromNodeId = null, onNodeCreated = null, selectionQuote = null, selectionSourceNodeId = null } = {}) => {
     const hasContent = (content && content.trim()) || images.length > 0;
     if (!hasContent || state.isStreaming) return;
 
@@ -473,9 +473,19 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     const storedImages = images.map(({ mediaType, base64 }) => ({ mediaType, base64 }));
 
     // 1. Create + add user node
-    const userNode = makeNode({ parentId, role: 'user', content: content.trim(), images: storedImages });
+    const userNode = makeNode({ parentId, role: 'user', content: content.trim(), images: storedImages, selectionQuote, selectionSourceNodeId });
     dispatch({ type: ACTIONS.ADD_NODE, payload: { node: userNode, parentId, preserveActiveLeaf } });
     onNodeCreated?.(userNode.id);
+
+    if (selectionQuote && selectionSourceNodeId) {
+      dispatch({
+        type: ACTIONS.ADD_SELECTION_BRANCH,
+        payload: {
+          nodeId: selectionSourceNodeId,
+          branch: { id: nanoid(8), text: selectionQuote, childNodeId: userNode.id },
+        },
+      });
+    }
 
     // 2. Persist to Firestore if logged in (images omitted — base64 data too large)
     const convId = await ensureConversation(content.trim() || '(image)');
@@ -484,6 +494,15 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     // 3. Build conversation context with provider-specific multimodal format
     const historyPath = parentId ? getPath(state.nodes, parentId) : [];
 
+    let modelText = content.trim();
+    if (selectionQuote) {
+      const sourceNode = selectionSourceNodeId ? state.nodes[selectionSourceNodeId] : null;
+      const sourceAssistantPlain = sourceNode?.role === 'assistant'
+        ? assistantPlainTextForModel(sourceNode.content)
+        : null;
+      modelText = withSelectionQuote(modelText, selectionQuote, sourceAssistantPlain);
+    }
+
     const userContent = storedImages.length > 0
       ? provider === 'openai'
         ? [
@@ -491,16 +510,16 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
               type: 'image_url',
               image_url: { url: `data:${img.mediaType};base64,${img.base64}` },
             })),
-            { type: 'text', text: content.trim() || '' },
+            { type: 'text', text: modelText || '' },
           ]
         : [
             ...storedImages.map((img) => ({
               type: 'image',
               source: { type: 'base64', media_type: img.mediaType, data: img.base64 },
             })),
-            { type: 'text', text: content.trim() || '' },
+            { type: 'text', text: modelText || '' },
           ]
-      : content.trim();
+      : modelText;
 
     const messages = [
       ...pathToMessages(historyPath, provider),

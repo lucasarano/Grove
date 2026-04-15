@@ -134,9 +134,26 @@ const InputBar = forwardRef(function InputBar(
     ? 'color-mix(in srgb, var(--color-error) 40%, transparent)'
     : 'var(--color-border-strong)';
 
+  const footerMetaTruncate = {
+    margin: 0,
+    fontSize: '0.75rem',
+    letterSpacing: '0.02em',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    minWidth: 0,
+  };
+
+  const hintText = isStreaming
+    ? 'Draft your next message · sends when this reply finishes · Enter / Shift+Enter for new lines · drag & drop or attach images'
+    : 'Enter to send · Shift+Enter for newline · Drag & drop or attach images';
+
   return (
     <div style={{
       flexShrink: 0,
+      minWidth: 0,
+      width: '100%',
+      boxSizing: 'border-box',
       borderTop: '1px solid var(--color-border)',
       background: 'var(--color-bg)',
       padding: 'var(--space-3) var(--space-4)',
@@ -372,33 +389,42 @@ const InputBar = forwardRef(function InputBar(
         marginTop: '0.5rem',
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
+        gap: '0.75rem',
+        minWidth: 0,
+        width: '100%',
       }}>
-        <p style={{
-          margin: 0,
-          fontSize: '0.75rem',
-          fontWeight: 400,
-          color: 'var(--color-text-tertiary)',
-          letterSpacing: '0.02em',
-        }}>
-          {isStreaming
-            ? 'Draft your next message · sends when this reply finishes · Enter / Shift+Enter for new lines · drag & drop or attach images'
-            : 'Enter to send · Shift+Enter for newline · Drag & drop or attach images'}
+        <p
+          title={hintText}
+          style={{
+            ...footerMetaTruncate,
+            flex: '1 1 0%',
+            fontWeight: 400,
+            color: 'var(--color-text-tertiary)',
+          }}
+        >
+          {hintText}
         </p>
 
         {isLoggedIn && keyMode === 'credits' && (
-          <p style={{
-            margin: 0,
-            fontSize: '0.75rem',
-            fontWeight: 500,
-            letterSpacing: '0.02em',
-            color: enforceLimit
-              ? 'var(--color-error)'
-              : tokensRemaining < tokenLimit * 0.1
-              ? 'var(--color-warning, #f59e0b)'
-              : 'var(--color-text-tertiary)',
-            whiteSpace: 'nowrap',
-          }}>
+          <p
+            title={
+              enforceLimit
+                ? '0 tokens remaining'
+                : `${tokensRemaining.toLocaleString()} / ${tokenLimit.toLocaleString()} tokens remaining`
+            }
+            style={{
+              ...footerMetaTruncate,
+              flex: '0 1 auto',
+              maxWidth: '48%',
+              fontWeight: 500,
+              textAlign: 'right',
+              color: enforceLimit
+                ? 'var(--color-error)'
+                : tokensRemaining < tokenLimit * 0.1
+                ? 'var(--color-warning, #f59e0b)'
+                : 'var(--color-text-tertiary)',
+            }}
+          >
             {enforceLimit
               ? '0 tokens remaining'
               : `${tokensRemaining.toLocaleString()} / ${tokenLimit.toLocaleString()} tokens remaining`}
@@ -406,14 +432,21 @@ const InputBar = forwardRef(function InputBar(
         )}
 
         {isLoggedIn && keyMode === 'api-keys' && (
-          <p style={{
-            margin: 0,
-            fontSize: '0.75rem',
-            fontWeight: 500,
-            letterSpacing: '0.02em',
-            color: 'var(--color-text-tertiary)',
-            whiteSpace: 'nowrap',
-          }}>
+          <p
+            title={
+              sessionTokensUsed > 0
+                ? `${sessionTokensUsed.toLocaleString()} tokens used · your API key`
+                : 'API usage · your API key'
+            }
+            style={{
+              ...footerMetaTruncate,
+              flex: '0 1 auto',
+              maxWidth: '48%',
+              fontWeight: 500,
+              textAlign: 'right',
+              color: 'var(--color-text-tertiary)',
+            }}
+          >
             {sessionTokensUsed > 0
               ? `${sessionTokensUsed.toLocaleString()} tokens used · your API key`
               : 'API usage · your API key'}

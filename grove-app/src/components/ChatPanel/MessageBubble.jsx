@@ -231,13 +231,48 @@ function normalizeLatexDelimiters(markdown) {
     .join('');
 }
 
+function makeMarkElement(text, branchId, onClick) {
+  const mark = document.createElement('mark');
+  mark.textContent = text;
+  mark.dataset.branchId = branchId;
+  mark.title = 'Click to go to this branch';
+  Object.assign(mark.style, {
+    background: 'color-mix(in srgb, var(--color-accent) 28%, transparent)',
+    color: 'inherit',
+    borderRadius: '2px',
+    cursor: 'pointer',
+    padding: '1px 0',
+    borderBottom: '1.5px solid color-mix(in srgb, var(--color-accent) 70%, transparent)',
+    transition: 'background 0.15s ease',
+  });
+  mark.addEventListener('mouseenter', () => {
+    mark.style.background = 'color-mix(in srgb, var(--color-accent) 42%, transparent)';
+  });
+  mark.addEventListener('mouseleave', () => {
+    mark.style.background = 'color-mix(in srgb, var(--color-accent) 28%, transparent)';
+  });
+  mark.addEventListener('click', onClick);
+  return mark;
+}
+
 /**
- * Find the first occurrence of `searchText` in the DOM text nodes under
- * `root`, wrap it with a <mark> element, and attach the onClick handler.
- * Skips text nodes inside <code> and <pre> blocks.
+ * Find the first occurrence of `searchText` across the flattened text content
+ * under `root` (skipping code/pre nodes) and wrap the matching portion(s) with
+ * <mark> elements.  Works even when the selection spans multiple inline elements
+ * such as <strong>, <em>, <a>, <h1>, etc.
+ *
+ * When the match sits entirely in one text node, a single <mark> is inserted.
+ * When it spans multiple text nodes (e.g. bold + regular text), a <mark> is
+ * inserted around the relevant fragment of each participating text node so the
+ * whole run is visually highlighted and each fragment is clickable.
+ *
+ * Normalises whitespace in the search so that newlines inserted by the browser's
+ * selection algorithm between block elements (e.g. paragraphs) are treated as
+ * spaces and still match the DOM text content.
  */
 function wrapTextInElement(root, searchText, branchId, onClick) {
   if (!root || !searchText) return;
+
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       const parent = node.parentElement;
@@ -248,41 +283,59 @@ function wrapTextInElement(root, searchText, branchId, onClick) {
     },
   });
 
+  const textNodes = [];
   let cur;
-  while ((cur = walker.nextNode())) {
-    const idx = cur.nodeValue.indexOf(searchText);
-    if (idx === -1) continue;
+  while ((cur = walker.nextNode())) textNodes.push(cur);
+  if (!textNodes.length) return;
 
-    const before = cur.nodeValue.slice(0, idx);
-    const after = cur.nodeValue.slice(idx + searchText.length);
+  // Build a concatenated view of all visible text to locate the match.
+  // Normalize whitespace so selections that span block boundaries (where the
+  // browser adds \n) still match the DOM's plain text content.
+  const combined = textNodes.map((n) => n.nodeValue).join('');
+  const normalizedCombined = combined.replace(/\s+/g, ' ');
+  const normalizedSearch = searchText.replace(/\s+/g, ' ').trim();
 
-    const mark = document.createElement('mark');
-    mark.textContent = searchText;
-    mark.dataset.branchId = branchId;
-    mark.title = 'Click to go to this branch';
-    Object.assign(mark.style, {
-      background: 'color-mix(in srgb, var(--color-accent) 28%, transparent)',
-      color: 'inherit',
-      borderRadius: '2px',
-      cursor: 'pointer',
-      padding: '1px 0',
-      borderBottom: '1.5px solid color-mix(in srgb, var(--color-accent) 70%, transparent)',
-      transition: 'background 0.15s ease',
-    });
-    mark.addEventListener('mouseenter', () => {
-      mark.style.background = 'color-mix(in srgb, var(--color-accent) 42%, transparent)';
-    });
-    mark.addEventListener('mouseleave', () => {
-      mark.style.background = 'color-mix(in srgb, var(--color-accent) 28%, transparent)';
-    });
-    mark.addEventListener('click', onClick);
+  const idx = normalizedCombined.indexOf(normalizedSearch);
+  if (idx === -1) return;
 
-    const parent = cur.parentNode;
-    if (before) parent.insertBefore(document.createTextNode(before), cur);
-    parent.insertBefore(mark, cur);
-    if (after) parent.insertBefore(document.createTextNode(after), cur);
-    parent.removeChild(cur);
-    return; // only first occurrence per branch
+  const endIdx = idx + normalizedSearch.length;
+
+  // Map the match position back to individual text nodes.
+  let pos = 0;
+  const toWrap = [];
+  for (const tn of textNodes) {
+    const len = tn.nodeValue.length;
+    const nodeStart = pos;
+    const nodeEnd = pos + len;
+    if (nodeEnd > idx && nodeStart < endIdx) {
+      toWrap.push({
+        node: tn,
+        start: Math.max(0, idx - nodeStart),
+        end: Math.min(len, endIdx - nodeStart),
+      });
+    }
+    pos += len;
+    if (pos >= endIdx) break;
+  }
+
+  if (!toWrap.length) return;
+
+  // Process in reverse order so earlier insertions don't shift later offsets.
+  for (let i = toWrap.length - 1; i >= 0; i--) {
+    const { node, start, end } = toWrap[i];
+    const before = node.nodeValue.slice(0, start);
+    const matched = node.nodeValue.slice(start, end);
+    const after = node.nodeValue.slice(end);
+    if (!matched) continue;
+
+    const mark = makeMarkElement(matched, branchId, onClick);
+    const parent = node.parentNode;
+    if (!parent) continue;
+
+    if (after) parent.insertBefore(document.createTextNode(after), node);
+    parent.insertBefore(mark, node);
+    if (before) parent.insertBefore(document.createTextNode(before), node);
+    parent.removeChild(node);
   }
 }
 
@@ -437,7 +490,7 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '', onBra
   const branchButtonRef = useRef(null);
   const proseRef = useRef(null);
 
-  const { branchFrom, branchAndSend, navigateToBranchFrom, switchToBranch, activeLeafId, nodes } = useConversation();
+  const { branchFrom, branchAndSend, sendMessage, navigateToBranchFrom, switchToBranch, activeLeafId, nodes } = useConversation();
 
   const isAssistant = node.role === 'assistant';
   const raw = isStreaming ? streamingContent : node.content;
@@ -512,6 +565,17 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '', onBra
     function applyMarks() {
       // Re-query inside the deferred callback so we work on the current DOM.
       const marks = prose.querySelectorAll('mark[data-branch-id]');
+
+      // If the marks already match the expected branches exactly, skip all DOM
+      // mutations.  This prevents the drag-selection anchor from being
+      // invalidated by an unnecessary remove+re-add cycle during re-renders.
+      const existingIds = new Set([...marks].map((m) => m.dataset.branchId));
+      const expectedIds = new Set(branches.map((b) => b.id));
+      const alreadyCorrect =
+        existingIds.size === expectedIds.size &&
+        [...expectedIds].every((id) => existingIds.has(id));
+      if (alreadyCorrect) return;
+
       marks.forEach((m) => {
         m.parentNode?.replaceChild(document.createTextNode(m.textContent), m);
       });
@@ -567,26 +631,23 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '', onBra
   }
 
   function handleBranchFromSelection(prompt, selectedText) {
-    // "Leaf" from this panel's perspective (panelLeafId overrides the global
-    // activeLeafId when this bubble is inside the split/compare panel).
     const effectiveLeafId = panelLeafId ?? activeLeafId;
     const isLeaf = node.id === effectiveLeafId;
 
-    // When this bubble lives in the split panel, route through preserveActiveLeaf
-    // so the main panel's view is never disturbed.
     const branchOpts = onBranchNodeCreated
       ? { preserveActiveLeaf: true, onNodeCreated: onBranchNodeCreated }
       : {};
 
     if (isLeaf) {
-      const parentUser = node.parentId ? nodes[node.parentId] : null;
-      const grandparentId = parentUser?.parentId ?? null;
-
-      if (grandparentId) {
-        branchAndSend(grandparentId, prompt, selectedText, node.id, branchOpts);
-      } else {
-        branchAndSend(node.id, prompt, selectedText, null, branchOpts);
+      const sendOpts = {
+        selectionQuote: selectedText,
+        selectionSourceNodeId: node.id,
+      };
+      if (onBranchNodeCreated) {
+        sendOpts.fromNodeId = node.id;
+        sendOpts.onNodeCreated = onBranchNodeCreated;
       }
+      sendMessage(prompt, [], sendOpts);
     } else {
       branchAndSend(node.id, prompt, selectedText, null, branchOpts);
     }
