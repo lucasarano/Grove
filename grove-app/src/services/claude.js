@@ -40,6 +40,24 @@ The topic label is shown in a compact conversation tree; keep it specific and re
  * @param {(err: Error) => void} params.onError
  * @returns {{ abort: () => void }}
  */
+/**
+ * Anthropic's Messages API requires the `messages` array to start with a
+ * `user` turn. Grove threads often begin with an assistant greeting; without
+ * this, the leading assistant message is dropped or mishandled and the model
+ * loses prior context (including highlight-to-branch turns).
+ */
+function ensureAnthropicMessagesStartWithUser(messages) {
+  if (!messages?.length || messages[0].role === 'user') return messages;
+  return [
+    {
+      role: 'user',
+      content:
+        '[This thread began with the assistant message below; treat it as prior context.]',
+    },
+    ...messages,
+  ];
+}
+
 async function streamMessage({ apiKey, model, messages, systemPrompt, onChunk, onDone, onError }) {
   const client = getClient(apiKey);
 
@@ -50,7 +68,7 @@ async function streamMessage({ apiKey, model, messages, systemPrompt, onChunk, o
       model: model || DEFAULT_MODEL,
       max_tokens: 4096,
       system: systemPrompt || DEFAULT_SYSTEM_PROMPT,
-      messages,
+      messages: ensureAnthropicMessagesStartWithUser(messages),
     });
 
     stream.on('text', (text) => onChunk(text));

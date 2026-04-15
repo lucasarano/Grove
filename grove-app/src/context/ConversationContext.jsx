@@ -2,7 +2,7 @@ import { createContext, useContext, useCallback, useEffect, useReducer, useRef }
 import { nanoid } from 'nanoid';
 import { streamMessage, DEFAULT_MODEL, MODELS } from '../services/claude';
 import { streamOpenAIMessage } from '../services/openai';
-import { splitTopicFromContent } from '../lib/topicMetadata';
+import { splitTopicFromContent, stripTopicBlockForDisplay } from '../lib/topicMetadata';
 import {
   readStoredProviderKeys,
   readKeyMode,
@@ -94,15 +94,60 @@ function getPath(nodes, leafId) {
   return path;
 }
 
+/** Plain text as shown to the user (topic block stripped) for API context. */
+function assistantPlainTextForModel(raw) {
+  const { content } = splitTopicFromContent(raw || '');
+  return stripTopicBlockForDisplay(content);
+}
+
 /**
- * Append the highlighted excerpt to the user's message as a plain
- * parenthetical.  Explicitly identifying the excerpt as coming from the
- * model's own previous response prevents smaller models from trying to
- * interpret a potentially incomplete fragment as an unknown external phrase.
+ * Pull a window around the highlighted substring so the model sees local
+ * context even when the selection is a broken fragment vs. stored markdown.
  */
-function withSelectionQuote(text, selectionQuote) {
+function excerptWindowAroundSelection(plain, quote, radius = 220) {
+  if (!plain || !quote) return null;
+  const q = quote.trim();
+  if (!q) return null;
+
+  let idx = plain.indexOf(q);
+  let matchLen = q.length;
+
+  if (idx === -1) {
+    const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts = q.split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return null;
+    const pattern = parts.map(escapeRe).join('\\s+');
+    const re = new RegExp(pattern, 'im');
+    const m = plain.match(re);
+    if (!m || m.index === undefined) return null;
+    idx = m.index;
+    matchLen = m[0].length;
+  }
+
+  const start = Math.max(0, idx - radius);
+  const end = Math.min(plain.length, idx + matchLen + radius);
+  let slice = plain.slice(start, end).trim();
+  if (start > 0) slice = `…${slice}`;
+  if (end < plain.length) slice = `${slice}…`;
+  return slice;
+}
+
+/**
+ * User message for highlight-to-branch: anchor the excerpt in the assistant's
+ * prior reply and optionally include surrounding text from that reply.
+ */
+function withSelectionQuote(text, selectionQuote, sourceAssistantPlain = null) {
   if (!selectionQuote) return text || '';
-  const ref = `(I highlighted this excerpt from your previous response: "${selectionQuote}")`;
+  let ref =
+    'The user highlighted the following from your previous assistant message (it may be a partial phrase):\n' +
+    `"""${selectionQuote}"""\n` +
+    'Answer their question about that highlighted part; use your earlier reply in this thread as context.';
+  const win = sourceAssistantPlain
+    ? excerptWindowAroundSelection(sourceAssistantPlain, selectionQuote)
+    : null;
+  if (win) {
+    ref += `\n\nNearby text from that same reply (for grounding):\n${win}`;
+  }
   return text ? `${text}\n\n${ref}` : ref;
 }
 
@@ -113,7 +158,10 @@ function withSelectionQuote(text, selectionQuote) {
  */
 function pathToMessages(path, provider = 'anthropic') {
   return path.map((n) => {
-    const text = withSelectionQuote(n.content, n.selectionQuote);
+    const text =
+      n.role === 'assistant'
+        ? assistantPlainTextForModel(n.content)
+        : withSelectionQuote(n.content, n.selectionQuote);
     if (n.images && n.images.length > 0) {
       if (provider === 'openai') {
         return {
@@ -589,10 +637,19 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     // the user actually highlighted, otherwise it has no context for the
     // selected excerpt.
     const contextNodeId = highlightNodeId ?? parentId;
+    const highlightSource = state.nodes[contextNodeId];
+    const sourceAssistantPlain =
+      highlightSource?.role === 'assistant'
+        ? assistantPlainTextForModel(highlightSource.content)
+        : null;
+
     const historyPath = getPath(state.nodes, contextNodeId);
     const messages = [
       ...pathToMessages(historyPath, provider),
-      { role: 'user', content: withSelectionQuote(content.trim(), selectionText) },
+      {
+        role: 'user',
+        content: withSelectionQuote(content.trim(), selectionText, sourceAssistantPlain),
+      },
     ];
 
     const assistantNode = makeNode({ parentId: userNode.id, role: 'assistant', content: '', model: state.model });
