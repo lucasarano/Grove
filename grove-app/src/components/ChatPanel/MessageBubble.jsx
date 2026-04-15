@@ -231,9 +231,18 @@ function normalizeLatexDelimiters(markdown) {
     .join('');
 }
 
+function setBranchMarkHover(branchId, hovered) {
+  document.querySelectorAll('mark[data-branch-id]').forEach((mark) => {
+    if (mark.dataset.branchId !== branchId) return;
+    mark.style.background = hovered
+      ? 'color-mix(in srgb, var(--color-accent) 42%, transparent)'
+      : 'color-mix(in srgb, var(--color-accent) 28%, transparent)';
+  });
+}
+
 function makeMarkElement(text, branchId, onClick) {
   const mark = document.createElement('mark');
-  mark.textContent = text;
+  if (text != null) mark.textContent = text;
   mark.dataset.branchId = branchId;
   mark.title = 'Click to go to this branch';
   Object.assign(mark.style, {
@@ -244,15 +253,96 @@ function makeMarkElement(text, branchId, onClick) {
     padding: '1px 0',
     borderBottom: '1.5px solid color-mix(in srgb, var(--color-accent) 70%, transparent)',
     transition: 'background 0.15s ease',
+    boxDecorationBreak: 'clone',
+    WebkitBoxDecorationBreak: 'clone',
   });
-  mark.addEventListener('mouseenter', () => {
-    mark.style.background = 'color-mix(in srgb, var(--color-accent) 42%, transparent)';
-  });
-  mark.addEventListener('mouseleave', () => {
-    mark.style.background = 'color-mix(in srgb, var(--color-accent) 28%, transparent)';
-  });
+  mark.addEventListener('mouseenter', () => setBranchMarkHover(branchId, true));
+  mark.addEventListener('mouseleave', () => setBranchMarkHover(branchId, false));
   mark.addEventListener('click', onClick);
   return mark;
+}
+
+function selectionTextEquivalent(a, b) {
+  if (a === b) return true;
+  const normalize = (value) => (value || '').replace(/\s+/g, ' ').trim();
+  if (normalize(a) === normalize(b)) return true;
+  const squash = (value) => (value || '').replace(/\s+/g, '');
+  return squash(a) === squash(b);
+}
+
+function closestTextBlock(node, root) {
+  const selector = 'p, li, blockquote, h1, h2, h3, h4, h5, h6, td, th';
+  let el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  while (el && el !== root) {
+    if (el.matches(selector)) return el;
+    el = el.parentElement;
+  }
+  return root;
+}
+
+function combinedTextOffsetToBoundary(textNodes, offset, isEnd = false) {
+  let pos = 0;
+  for (const node of textNodes) {
+    const len = node.nodeValue.length;
+    const end = pos + len;
+    if (offset < end || (isEnd && offset === end)) {
+      return { node, offset: offset - pos };
+    }
+    pos = end;
+  }
+
+  const last = textNodes[textNodes.length - 1];
+  return last ? { node: last, offset: last.nodeValue.length } : null;
+}
+
+function findTextMatch(textNodes, searchText) {
+  const combined = textNodes.map((n) => n.nodeValue).join('');
+  let idx = combined.indexOf(searchText);
+  let endIdx = idx + searchText.length;
+
+  if (idx === -1) {
+    const squashedSearch = searchText.replace(/\s+/g, '');
+    if (!squashedSearch) return null;
+
+    let squashedCombined = '';
+    const combinedIndexBySquashedIndex = [];
+    for (let i = 0; i < combined.length; i++) {
+      if (/\s/.test(combined[i])) continue;
+      combinedIndexBySquashedIndex.push(i);
+      squashedCombined += combined[i];
+    }
+
+    const squashedIdx = squashedCombined.indexOf(squashedSearch);
+    if (squashedIdx === -1) return null;
+
+    idx = combinedIndexBySquashedIndex[squashedIdx];
+    endIdx = combinedIndexBySquashedIndex[squashedIdx + squashedSearch.length - 1] + 1;
+  }
+
+  const start = combinedTextOffsetToBoundary(textNodes, idx);
+  const end = combinedTextOffsetToBoundary(textNodes, endIdx, true);
+  if (!start || !end) return null;
+
+  return { start, end, idx, endIdx };
+}
+
+function wrapRangeInSingleMark(root, match, branchId, onClick) {
+  const range = document.createRange();
+  range.setStart(match.start.node, match.start.offset);
+  range.setEnd(match.end.node, match.end.offset);
+
+  const startBlock = closestTextBlock(match.start.node, root);
+  const endBlock = closestTextBlock(match.end.node, root);
+  if (startBlock !== endBlock) return false;
+
+  const mark = makeMarkElement(null, branchId, onClick);
+  if (!range.toString()) return false;
+  try {
+    range.surroundContents(mark);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -261,10 +351,10 @@ function makeMarkElement(text, branchId, onClick) {
  * <mark> elements.  Works even when the selection spans multiple inline elements
  * such as <strong>, <em>, <a>, <h1>, etc.
  *
- * When the match sits entirely in one text node, a single <mark> is inserted.
- * When it spans multiple text nodes (e.g. bold + regular text), a <mark> is
- * inserted around the relevant fragment of each participating text node so the
- * whole run is visually highlighted and each fragment is clickable.
+ * For inline selections, the selected DOM range is wrapped with one <mark>, so
+ * formatting changes such as bold/emphasis do not create separate click boxes.
+ * Cross-block selections fall back to per-text-node marks, with shared hover
+ * styling so the fragments still behave as one branch target.
  *
  * Normalises whitespace in the search so that newlines inserted by the browser's
  * selection algorithm between block elements (e.g. paragraphs) are treated as
@@ -288,18 +378,12 @@ function wrapTextInElement(root, searchText, branchId, onClick) {
   while ((cur = walker.nextNode())) textNodes.push(cur);
   if (!textNodes.length) return;
 
-  // Build a concatenated view of all visible text nodes to locate the match.
-  // We intentionally do NOT normalise whitespace here: normalisation changes
-  // character counts so positions derived from the normalised string no longer
-  // correspond to offsets in the original text nodes, which would corrupt the
-  // text when we split them.  Cross-paragraph selections (where the browser
-  // adds a '\n' in sel.toString() that doesn't exist in any DOM text node) will
-  // simply produce no match and no mark — a safe no-op.
-  const combined = textNodes.map((n) => n.nodeValue).join('');
-  const idx = combined.indexOf(searchText);
-  if (idx === -1) return;
-
-  const endIdx = idx + searchText.length;
+  // Locate the selected text in a flattened text-node view. Exact matches keep
+  // their offsets; the fallback ignores whitespace so selections that include
+  // browser-inserted line breaks can still map back to the original text nodes.
+  const match = findTextMatch(textNodes, searchText);
+  if (!match) return;
+  if (wrapRangeInSingleMark(root, match, branchId, onClick)) return;
 
   // Map the match position back to individual text nodes.
   let pos = 0;
@@ -308,35 +392,40 @@ function wrapTextInElement(root, searchText, branchId, onClick) {
     const len = tn.nodeValue.length;
     const nodeStart = pos;
     const nodeEnd = pos + len;
-    if (nodeEnd > idx && nodeStart < endIdx) {
+    if (nodeEnd > match.idx && nodeStart < match.endIdx) {
       toWrap.push({
         node: tn,
-        start: Math.max(0, idx - nodeStart),
-        end: Math.min(len, endIdx - nodeStart),
+        start: Math.max(0, match.idx - nodeStart),
+        end: Math.min(len, match.endIdx - nodeStart),
       });
     }
     pos += len;
-    if (pos >= endIdx) break;
+    if (pos >= match.endIdx) break;
   }
 
   if (!toWrap.length) return;
 
-  // Process in reverse order so earlier insertions don't shift later offsets.
+  // Process in reverse document order so later text-node splits don't affect
+  // the offsets we already computed for earlier nodes.
   for (let i = toWrap.length - 1; i >= 0; i--) {
     const { node, start, end } = toWrap[i];
-    const before = node.nodeValue.slice(0, start);
-    const matched = node.nodeValue.slice(start, end);
-    const after = node.nodeValue.slice(end);
-    if (!matched) continue;
-
-    const mark = makeMarkElement(matched, branchId, onClick);
     const parent = node.parentNode;
     if (!parent) continue;
 
-    if (before) parent.insertBefore(document.createTextNode(before), node);
-    parent.insertBefore(mark, node);
-    if (after) parent.insertBefore(document.createTextNode(after), node);
-    parent.removeChild(node);
+    const matchLength = end - start;
+    if (matchLength <= 0) continue;
+
+    let matchNode = node;
+    if (start > 0) {
+      matchNode = node.splitText(start);
+    }
+
+    if (matchLength < matchNode.nodeValue.length) {
+      matchNode.splitText(matchLength);
+    }
+
+    const mark = makeMarkElement(matchNode.nodeValue, branchId, onClick);
+    parent.replaceChild(mark, matchNode);
   }
 }
 
@@ -491,12 +580,17 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '', onBra
   const branchButtonRef = useRef(null);
   const proseRef = useRef(null);
 
-  const { branchFrom, branchAndSend, sendMessage, navigateToBranchFrom, switchToBranch, activeLeafId, nodes } = useConversation();
+  const { branchFrom, branchAndSend, sendMessage, navigateToBranchFrom, switchToBranch, activeLeafId } = useConversation();
 
   const isAssistant = node.role === 'assistant';
   const raw = isStreaming ? streamingContent : node.content;
   const content = isAssistant ? stripTopicBlockForDisplay(raw) : raw;
   const markdownContent = normalizeLatexDelimiters(content);
+  const selectionBranches = node.selectionBranches || [];
+  const selectionBranchSignature = selectionBranches
+    .map((branch) => [branch.id, branch.childNodeId, branch.text].join('::'))
+    .join('||');
+  const markdownRenderKey = `${node.id}:${selectionBranchSignature}`;
 
   function handleBranch() {
     branchFrom(node.id);
@@ -551,13 +645,16 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '', onBra
   // Runs after every render so React reconciliation can't orphan our marks.
 
   const navigateRef = useRef(navigateToBranchFrom);
-  navigateRef.current = navigateToBranchFrom;
+
+  useLayoutEffect(() => {
+    navigateRef.current = navigateToBranchFrom;
+  }, [navigateToBranchFrom]);
 
   useLayoutEffect(() => {
     const prose = proseRef.current;
     if (!prose) return;
 
-    const branches = node.selectionBranches || [];
+    const branches = selectionBranches;
     const existingMarks = prose.querySelectorAll('mark[data-branch-id]');
 
     // Nothing to do — skip entirely to avoid any chance of disturbing the DOM.
@@ -570,11 +667,15 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '', onBra
       // If the marks already match the expected branches exactly, skip all DOM
       // mutations.  This prevents the drag-selection anchor from being
       // invalidated by an unnecessary remove+re-add cycle during re-renders.
-      const existingIds = new Set([...marks].map((m) => m.dataset.branchId));
-      const expectedIds = new Set(branches.map((b) => b.id));
+      const markedTextById = new Map();
+      marks.forEach((mark) => {
+        const id = mark.dataset.branchId;
+        if (!id) return;
+        markedTextById.set(id, `${markedTextById.get(id) || ''}${mark.textContent || ''}`);
+      });
       const alreadyCorrect =
-        existingIds.size === expectedIds.size &&
-        [...expectedIds].every((id) => existingIds.has(id));
+        markedTextById.size === branches.length &&
+        branches.every((branch) => selectionTextEquivalent(markedTextById.get(branch.id), branch.text));
       if (alreadyCorrect) return;
 
       marks.forEach((m) => {
@@ -759,6 +860,7 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '', onBra
           style={{ maxWidth: '680px' }}
         >
           <ReactMarkdown
+            key={markdownRenderKey}
             remarkPlugins={[remarkGfm, remarkMath]}
             rehypePlugins={[[rehypeKatex, { strict: false, throwOnError: false }]]}
             components={MD_COMPONENTS}
