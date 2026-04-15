@@ -139,14 +139,14 @@ function excerptWindowAroundSelection(plain, quote, radius = 220) {
 function withSelectionQuote(text, selectionQuote, sourceAssistantPlain = null) {
   if (!selectionQuote) return text || '';
   let ref =
-    'The user highlighted the following from your previous assistant message (it may be a partial phrase):\n' +
-    `"""${selectionQuote}"""\n` +
-    'Answer their question about that highlighted part; use your earlier reply in this thread as context.';
+    'Context for this follow-up; use it silently and answer the user directly:\n' +
+    `Excerpt from your prior answer: """${selectionQuote}"""\n` +
+    'Do not say the user highlighted or selected text, and do not quote the prior sentence unless asked.';
   const win = sourceAssistantPlain
     ? excerptWindowAroundSelection(sourceAssistantPlain, selectionQuote)
     : null;
   if (win) {
-    ref += `\n\nNearby text from that same reply (for grounding):\n${win}`;
+    ref += `\n\nNearby context from that same reply:\n${win}`;
   }
   return text ? `${text}\n\n${ref}` : ref;
 }

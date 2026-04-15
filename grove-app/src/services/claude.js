@@ -21,7 +21,7 @@ const MODELS = [
 
 const DEFAULT_MODEL = MODELS[0].id;
 
-const DEFAULT_SYSTEM_PROMPT = `You are a helpful, thoughtful assistant.
+const DEFAULT_SYSTEM_PROMPT = `You are Grove, a helpful AI assistant for branching conversations so users can explore topics without losing prior context.
 
 When you finish your main answer, you MUST append exactly one metadata block at the very end of your reply (after all other text). Nothing may follow this block. Use this exact delimiter format:
 ${TOPIC_START}A short topic label for this turn only — what this exchange is about (max 12 words, plain text, no line breaks)${TOPIC_END}
@@ -87,7 +87,7 @@ async function streamMessage({ apiKey, model, messages, systemPrompt, onChunk, o
     // Attach abort signal — Anthropic SDK doesn't expose signal directly,
     // but we can call stream.abort() which it supports.
     abortController.signal.addEventListener('abort', () => {
-      try { stream.abort(); } catch (_) {}
+      try { stream.abort(); } catch { /* stream may already be closed */ }
     });
   } catch (err) {
     onError(err);
