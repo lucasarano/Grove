@@ -139,16 +139,33 @@ function excerptWindowAroundSelection(plain, quote, radius = 220) {
 function withSelectionQuote(text, selectionQuote, sourceAssistantPlain = null) {
   if (!selectionQuote) return text || '';
   let ref =
-    'Context for this follow-up; use it silently and answer the user directly:\n' +
-    `Excerpt from your prior answer: """${selectionQuote}"""\n` +
-    'Do not say the user highlighted or selected text, and do not quote the prior sentence unless asked.';
+    'Context for that earlier follow-up:\n' +
+    `Referenced text: """${selectionQuote}"""`;
   const win = sourceAssistantPlain
     ? excerptWindowAroundSelection(sourceAssistantPlain, selectionQuote)
     : null;
   if (win) {
-    ref += `\n\nNearby context from that same reply:\n${win}`;
+    ref += `\nNearby context:\n${win}`;
   }
   return text ? `${text}\n\n${ref}` : ref;
+}
+
+function selectionSystemPrompt(selectionQuote, sourceAssistantPlain = null) {
+  if (!selectionQuote) return null;
+  let prompt =
+    'Private context for this turn: the user is asking about the referenced text below. ' +
+    'If their message says "this", "that", "it", or asks what something is, treat it as referring to the referenced text. ' +
+    'If the referenced text is only part of a word or phrase, infer the complete concept from nearby context. ' +
+    'Answer directly about that concept. Do not say you lack context when nearby context is present. ' +
+    'Do not mention highlights, selections, snippets, excerpts, or your previous response unless the user explicitly asks.\n' +
+    `Referenced excerpt: """${selectionQuote}"""`;
+  const win = sourceAssistantPlain
+    ? excerptWindowAroundSelection(sourceAssistantPlain, selectionQuote)
+    : null;
+  if (win) {
+    prompt += `\nNearby context:\n${win}`;
+  }
+  return prompt;
 }
 
 /**
@@ -494,14 +511,15 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     // 3. Build conversation context with provider-specific multimodal format
     const historyPath = parentId ? getPath(state.nodes, parentId) : [];
 
-    let modelText = content.trim();
-    if (selectionQuote) {
-      const sourceNode = selectionSourceNodeId ? state.nodes[selectionSourceNodeId] : null;
-      const sourceAssistantPlain = sourceNode?.role === 'assistant'
-        ? assistantPlainTextForModel(sourceNode.content)
-        : null;
-      modelText = withSelectionQuote(modelText, selectionQuote, sourceAssistantPlain);
-    }
+    const sourceNode = selectionSourceNodeId ? state.nodes[selectionSourceNodeId] : null;
+    const sourceAssistantPlain = sourceNode?.role === 'assistant'
+      ? assistantPlainTextForModel(sourceNode.content)
+      : null;
+    const turnSystemPrompt = selectionQuote
+      ? selectionSystemPrompt(selectionQuote, sourceAssistantPlain)
+      : null;
+
+    const modelText = content.trim();
 
     const userContent = storedImages.length > 0
       ? provider === 'openai'
@@ -550,8 +568,8 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
       : streamMessage;
 
     const streamParams = provider === 'openai'
-      ? { apiKey: openaiKey, model: state.model, messages }
-      : { apiKey: anthropicKey, model: state.model, messages };
+      ? { apiKey: openaiKey, model: state.model, messages, systemPrompt: turnSystemPrompt }
+      : { apiKey: anthropicKey, model: state.model, messages, systemPrompt: turnSystemPrompt };
 
     const { abort } = await streamFn({
       ...streamParams,
@@ -667,9 +685,10 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
       ...pathToMessages(historyPath, provider),
       {
         role: 'user',
-        content: withSelectionQuote(content.trim(), selectionText, sourceAssistantPlain),
+        content: content.trim(),
       },
     ];
+    const turnSystemPrompt = selectionSystemPrompt(selectionText, sourceAssistantPlain);
 
     const assistantNode = makeNode({ parentId: userNode.id, role: 'assistant', content: '', model: state.model });
     dispatch({ type: ACTIONS.ADD_NODE, payload: { node: assistantNode, parentId: userNode.id, preserveActiveLeaf } });
@@ -682,8 +701,8 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     let accumulated = '';
     const streamFn = provider === 'openai' ? streamOpenAIMessage : streamMessage;
     const streamParams = provider === 'openai'
-      ? { apiKey: openaiKey, model: state.model, messages }
-      : { apiKey: anthropicKey, model: state.model, messages };
+      ? { apiKey: openaiKey, model: state.model, messages, systemPrompt: turnSystemPrompt }
+      : { apiKey: anthropicKey, model: state.model, messages, systemPrompt: turnSystemPrompt };
 
     const { abort } = await streamFn({
       ...streamParams,

@@ -28,6 +28,12 @@ ${TOPIC_START}A short topic label for this turn only — what this exchange is a
 
 The topic label is shown in a compact conversation tree; keep it specific and readable.`;
 
+function composeSystemPrompt(systemPrompt) {
+  return systemPrompt
+    ? `${DEFAULT_SYSTEM_PROMPT}\n\n${systemPrompt}`
+    : DEFAULT_SYSTEM_PROMPT;
+}
+
 /**
  * Stream a claude response.
  * @param {object} params
@@ -67,7 +73,7 @@ async function streamMessage({ apiKey, model, messages, systemPrompt, onChunk, o
     const stream = client.messages.stream({
       model: model || DEFAULT_MODEL,
       max_tokens: 4096,
-      system: systemPrompt || DEFAULT_SYSTEM_PROMPT,
+      system: composeSystemPrompt(systemPrompt),
       messages: ensureAnthropicMessagesStartWithUser(messages),
     });
 

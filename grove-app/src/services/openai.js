@@ -15,10 +15,16 @@ ${TOPIC_START}A short topic label for this turn only — what this exchange is a
 
 The topic label is shown in a compact conversation tree; keep it specific and readable.`;
 
+function composeSystemPrompt(systemPrompt) {
+  return systemPrompt
+    ? `${OPENAI_SYSTEM_PROMPT}\n\n${systemPrompt}`
+    : OPENAI_SYSTEM_PROMPT;
+}
+
 /**
  * Stream an OpenAI response.
  */
-async function streamOpenAIMessage({ apiKey, model, messages, onChunk, onDone, onError }) {
+async function streamOpenAIMessage({ apiKey, model, messages, systemPrompt, onChunk, onDone, onError }) {
   const client = getClient(apiKey);
   const abortController = new AbortController();
 
@@ -28,7 +34,7 @@ async function streamOpenAIMessage({ apiKey, model, messages, onChunk, onDone, o
         model,
         max_tokens: 4096,
         messages: [
-          { role: 'system', content: OPENAI_SYSTEM_PROMPT },
+          { role: 'system', content: composeSystemPrompt(systemPrompt) },
           ...messages.map((m) => ({ role: m.role, content: m.content })),
         ],
         stream: true,
