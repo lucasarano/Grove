@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, memo } from 'react';
+import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -7,6 +8,8 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { GitFork, Robot, User, Copy, Check } from '@phosphor-icons/react';
 import { useConversation } from '../../context/ConversationContext';
 import { stripTopicBlockForDisplay } from '../../lib/topicMetadata';
+
+// ─── CopyButton ──────────────────────────────────────────────────────
 
 function CopyButton({ text }) {
   const [copied, setCopied] = useState(false);
@@ -45,6 +48,8 @@ function CopyButton({ text }) {
     </button>
   );
 }
+
+// ─── CodeBlock ───────────────────────────────────────────────────────
 
 const codeStyle = {
   'code[class*="language-"]': {
@@ -166,10 +171,10 @@ const MD_COMPONENTS = {
   code: CodeBlock,
 };
 
+// ─── Utilities ───────────────────────────────────────────────────────
+
 function normalizeLatexDelimiters(markdown) {
   if (!markdown || typeof markdown !== 'string') return markdown;
-
-  // Preserve fenced code blocks so math normalization does not mutate code examples.
   const segments = markdown.split(/(```[\s\S]*?```)/g);
   return segments
     .map((segment) => {
@@ -181,11 +186,205 @@ function normalizeLatexDelimiters(markdown) {
     .join('');
 }
 
+/**
+ * Find the first occurrence of `searchText` in the DOM text nodes under
+ * `root`, wrap it with a <mark> element, and attach the onClick handler.
+ * Skips text nodes inside <code> and <pre> blocks.
+ */
+function wrapTextInElement(root, searchText, branchId, onClick) {
+  if (!root || !searchText) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (parent && (parent.closest('code') || parent.closest('pre'))) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+
+  let cur;
+  while ((cur = walker.nextNode())) {
+    const idx = cur.nodeValue.indexOf(searchText);
+    if (idx === -1) continue;
+
+    const before = cur.nodeValue.slice(0, idx);
+    const after = cur.nodeValue.slice(idx + searchText.length);
+
+    const mark = document.createElement('mark');
+    mark.textContent = searchText;
+    mark.dataset.branchId = branchId;
+    mark.title = 'Click to go to this branch';
+    Object.assign(mark.style, {
+      background: 'color-mix(in srgb, var(--color-accent) 28%, transparent)',
+      color: 'inherit',
+      borderRadius: '2px',
+      cursor: 'pointer',
+      padding: '1px 0',
+      borderBottom: '1.5px solid color-mix(in srgb, var(--color-accent) 70%, transparent)',
+      transition: 'background 0.15s ease',
+    });
+    mark.addEventListener('mouseenter', () => {
+      mark.style.background = 'color-mix(in srgb, var(--color-accent) 42%, transparent)';
+    });
+    mark.addEventListener('mouseleave', () => {
+      mark.style.background = 'color-mix(in srgb, var(--color-accent) 28%, transparent)';
+    });
+    mark.addEventListener('click', onClick);
+
+    const parent = cur.parentNode;
+    if (before) parent.insertBefore(document.createTextNode(before), cur);
+    parent.insertBefore(mark, cur);
+    if (after) parent.insertBefore(document.createTextNode(after), cur);
+    parent.removeChild(cur);
+    return; // only first occurrence per branch
+  }
+}
+
+// ─── SelectionBranchPopover ──────────────────────────────────────────
+
+function SelectionBranchPopover({ selection, onBranch, onDismiss }) {
+  const [prompt, setPrompt] = useState('');
+  const inputRef = useRef(null);
+  const popoverRef = useRef(null);
+
+  // Focus the input when the popover appears
+  useEffect(() => {
+    const id = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  // Dismiss on click-outside or Escape
+  useEffect(() => {
+    function onMouseDown(e) {
+      if (popoverRef.current && !popoverRef.current.contains(e.target)) {
+        onDismiss();
+      }
+    }
+    function onKeyDown(e) {
+      if (e.key === 'Escape') onDismiss();
+    }
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [onDismiss]);
+
+  function handleSubmit() {
+    const trimmed = prompt.trim();
+    if (!trimmed) return;
+    onBranch(trimmed, selection.text);
+    setPrompt('');
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSubmit();
+    }
+  }
+
+  // Position: centered above the selection, with a small gap
+  const style = {
+    position: 'fixed',
+    top: selection.top - 8,
+    left: selection.centerX,
+    transform: 'translate(-50%, -100%)',
+    zIndex: 1000,
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.5rem',
+    background: 'var(--color-surface, var(--color-bg))',
+    border: '1px solid var(--color-accent-dim)',
+    padding: '0.45rem 0.6rem',
+    boxShadow: '0 4px 16px rgba(26, 26, 24, 0.18), 0 0 0 1px rgba(61,90,71,0.1)',
+    minWidth: 320,
+    maxWidth: 480,
+  };
+
+  const excerptStyle = {
+    fontSize: '0.7rem',
+    fontWeight: 400,
+    color: 'var(--color-text-tertiary)',
+    letterSpacing: '0.02em',
+    marginBottom: '0.4rem',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    maxWidth: 440,
+  };
+
+  const excerpt = selection.text.length > 60
+    ? `"${selection.text.slice(0, 60)}…"`
+    : `"${selection.text}"`;
+
+  return createPortal(
+    <div ref={popoverRef} style={style}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+        <div style={excerptStyle}>Branch from {excerpt}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <input
+            ref={inputRef}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Enter branch prompt…"
+            style={{
+              flex: 1,
+              background: 'transparent',
+              border: 'none',
+              outline: 'none',
+              fontFamily: 'var(--font-body)',
+              fontSize: '0.9rem',
+              fontWeight: 300,
+              color: 'var(--color-text-primary)',
+              lineHeight: 1.5,
+            }}
+          />
+          <button
+            onClick={handleSubmit}
+            disabled={!prompt.trim()}
+            title="Branch from selection (Enter)"
+            style={{
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              background: prompt.trim() ? 'var(--color-accent)' : 'var(--color-border)',
+              border: 'none',
+              padding: '0.3rem 0.65rem',
+              cursor: prompt.trim() ? 'pointer' : 'default',
+              fontFamily: 'var(--font-body)',
+              fontSize: '0.78rem',
+              fontWeight: 500,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+              color: '#FFFFFF',
+              transition: 'background 0.15s ease',
+            }}
+          >
+            <GitFork size={13} weight="bold" />
+            Branch
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+// ─── MessageBubble ───────────────────────────────────────────────────
+
 function MessageBubble({ node, isStreaming = false, streamingContent = '' }) {
   const [hovered, setHovered] = useState(false);
+  const [selectionPopover, setSelectionPopover] = useState(null);
   const messageRef = useRef(null);
   const branchButtonRef = useRef(null);
-  const { branchFrom, activeLeafId } = useConversation();
+  const proseRef = useRef(null);
+
+  const { branchFrom, branchAndSend, navigateToBranchFrom, activeLeafId } = useConversation();
 
   const isAssistant = node.role === 'assistant';
   const raw = isStreaming ? streamingContent : node.content;
@@ -196,13 +395,15 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '' }) {
     branchFrom(node.id);
   }
 
-  const shouldShowBranch = isAssistant && hovered && !isStreaming && node.id !== activeLeafId;
+  const shouldShowBranch = isAssistant && hovered && !isStreaming && node.id !== activeLeafId && !selectionPopover;
+
+  // ── Sticky branch-button position ────────────────────────────────
 
   const syncBranchButtonPosition = useCallback(() => {
     if (!messageRef.current || !branchButtonRef.current || !shouldShowBranch) return;
 
     const rect = messageRef.current.getBoundingClientRect();
-    const fixedViewportTop = 112; // 7rem anchor from top of viewport
+    const fixedViewportTop = 112;
     const minTop = 24;
     const maxTop = Math.max(minTop, rect.height - 24);
     const desiredTop = fixedViewportTop - rect.top;
@@ -217,7 +418,6 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '' }) {
 
   useEffect(() => {
     if (!shouldShowBranch) return undefined;
-
     syncBranchButtonPosition();
 
     let rafId = null;
@@ -239,6 +439,65 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '' }) {
     };
   }, [shouldShowBranch, syncBranchButtonPosition]);
 
+  // ── Selection-branch marks (DOM post-processing) ──────────────────
+  // Runs after every render so React reconciliation can't orphan our marks.
+
+  const navigateRef = useRef(navigateToBranchFrom);
+  navigateRef.current = navigateToBranchFrom;
+
+  useLayoutEffect(() => {
+    const prose = proseRef.current;
+    if (!prose) return;
+
+    const branches = node.selectionBranches || [];
+
+    // Remove any existing marks first so we don't double-wrap.
+    prose.querySelectorAll('mark[data-branch-id]').forEach((m) => {
+      m.parentNode.replaceChild(document.createTextNode(m.textContent), m);
+    });
+    prose.normalize();
+
+    if (!branches.length) return;
+
+    for (const branch of branches) {
+      wrapTextInElement(prose, branch.text, branch.id, () => {
+        navigateRef.current(branch.childNodeId);
+      });
+    }
+  });
+
+  // ── Text selection → popover ──────────────────────────────────────
+
+  function handleMouseUp() {
+    if (!isAssistant || isStreaming) return;
+
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+
+    const selectedText = sel.toString().trim();
+    if (!selectedText) return;
+
+    const range = sel.getRangeAt(0);
+    if (!proseRef.current?.contains(range.commonAncestorContainer)) return;
+
+    const rect = range.getBoundingClientRect();
+    setSelectionPopover({
+      top: rect.top,
+      centerX: rect.left + rect.width / 2,
+      text: selectedText,
+    });
+  }
+
+  function handleBranchFromSelection(prompt, selectedText) {
+    branchAndSend(node.id, prompt, selectedText);
+    setSelectionPopover(null);
+    window.getSelection()?.removeAllRanges();
+  }
+
+  function dismissPopover() {
+    setSelectionPopover(null);
+  }
+
   return (
     <div
       ref={messageRef}
@@ -248,6 +507,7 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '' }) {
         syncBranchButtonPosition();
       }}
       onMouseLeave={() => setHovered(false)}
+      onMouseUp={handleMouseUp}
       style={{
         display: 'flex',
         gap: 'var(--space-3)',
@@ -296,8 +556,29 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '' }) {
           {isAssistant ? 'Assistant' : 'You'}
         </div>
 
+        {/* Selection quote (shown above user prompts branched from a highlight) */}
+        {!isAssistant && node.selectionQuote && (
+          <div style={{
+            borderLeft: '2px solid var(--color-accent-dim)',
+            paddingLeft: '0.65rem',
+            marginBottom: '0.5rem',
+            color: 'var(--color-text-tertiary)',
+            fontSize: '0.875rem',
+            fontStyle: 'italic',
+            lineHeight: 1.5,
+            maxWidth: '680px',
+            wordBreak: 'break-word',
+          }}>
+            &ldquo;{node.selectionQuote}&rdquo;
+          </div>
+        )}
+
         {/* Message text */}
-        <div className={`prose ${isStreaming ? 'streaming-cursor' : ''}`} style={{ maxWidth: '680px' }}>
+        <div
+          ref={proseRef}
+          className={`prose ${isStreaming ? 'streaming-cursor' : ''}`}
+          style={{ maxWidth: '680px' }}
+        >
           <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkMath]}
             rehypePlugins={[[rehypeKatex, { strict: false, throwOnError: false }]]}
@@ -308,7 +589,7 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '' }) {
         </div>
       </div>
 
-      {/* Branch only after a completed assistant (model) message — one branch point per turn */}
+      {/* Hover branch button — shown on non-leaf assistant messages */}
       {shouldShowBranch && (
         <button
           ref={branchButtonRef}
@@ -352,7 +633,7 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '' }) {
         </button>
       )}
 
-      {/* Active leaf indicator — shows on hover if this IS the leaf */}
+      {/* Active leaf indicator */}
       {hovered && !isStreaming && node.id === activeLeafId && (
         <div style={{
           position: 'absolute',
@@ -372,6 +653,15 @@ function MessageBubble({ node, isStreaming = false, streamingContent = '' }) {
           <GitFork size={12} />
           Current leaf
         </div>
+      )}
+
+      {/* Selection-branch popover (portal to document.body) */}
+      {selectionPopover && (
+        <SelectionBranchPopover
+          selection={selectionPopover}
+          onBranch={handleBranchFromSelection}
+          onDismiss={dismissPopover}
+        />
       )}
     </div>
   );

@@ -51,7 +51,7 @@ function branchLabel(content) {
   return content.slice(0, 48).replace(/\n/g, ' ').trim();
 }
 
-function makeNode({ parentId = null, role, content, model, images = [] }) {
+function makeNode({ parentId = null, role, content, model, images = [], selectionQuote = null }) {
   return {
     id: nanoid(10),
     parentId,
@@ -59,10 +59,25 @@ function makeNode({ parentId = null, role, content, model, images = [] }) {
     content,
     model,
     images,
+    selectionQuote,
     timestamp: Date.now(),
     children: [],
     branchLabel: branchLabel(content),
   };
+}
+
+/** Walk down the tree always taking the most-recently-created child until a leaf is reached. */
+function deepestLeaf(nodes, startId) {
+  let cur = startId;
+  for (;;) {
+    const node = nodes[cur];
+    if (!node || node.children.length === 0) return cur;
+    const latest = node.children
+      .map((id) => nodes[id])
+      .filter(Boolean)
+      .sort((a, b) => b.timestamp - a.timestamp)[0];
+    cur = latest.id;
+  }
 }
 
 /** Walk from a leaf up to root, return path as array [root, ..., leaf] */
@@ -79,11 +94,23 @@ function getPath(nodes, leafId) {
 }
 
 /**
+ * Prepend a selection quote to the message text sent to the model.
+ * The phrasing makes it unambiguous that the excerpt is FROM the
+ * assistant's previous response, not a truncated user message.
+ */
+function withSelectionQuote(text, selectionQuote) {
+  if (!selectionQuote) return text || '';
+  return `${text || ''}\n\n[Context: the above question refers to this excerpt from your previous response — use it silently to understand what is being asked, but answer naturally as if it were a fresh question without quoting or explicitly referencing this excerpt (the selection edges may be slightly imprecise): "${selectionQuote}"]`;
+}
+
+/**
  * Convert path to messages array for a given provider.
  * When a node has images, build a multimodal content array.
+ * When a node has selectionQuote, prepend it as a blockquote.
  */
 function pathToMessages(path, provider = 'anthropic') {
   return path.map((n) => {
+    const text = withSelectionQuote(n.content, n.selectionQuote);
     if (n.images && n.images.length > 0) {
       if (provider === 'openai') {
         return {
@@ -93,7 +120,7 @@ function pathToMessages(path, provider = 'anthropic') {
               type: 'image_url',
               image_url: { url: `data:${img.mediaType};base64,${img.base64}` },
             })),
-            { type: 'text', text: n.content || '' },
+            { type: 'text', text },
           ],
         };
       }
@@ -104,30 +131,31 @@ function pathToMessages(path, provider = 'anthropic') {
             type: 'image',
             source: { type: 'base64', media_type: img.mediaType, data: img.base64 },
           })),
-          { type: 'text', text: n.content || '' },
+          { type: 'text', text },
         ],
       };
     }
-    return { role: n.role, content: n.content };
+    return { role: n.role, content: text };
   });
 }
 
 // ─── Reducer ─────────────────────────────────────────────────────────
 
 const ACTIONS = {
-  SET_PROVIDER_KEYS:    'SET_PROVIDER_KEYS',
-  SET_KEY_MODE:         'SET_KEY_MODE',
-  SET_MODEL:            'SET_MODEL',
-  ADD_NODE:             'ADD_NODE',
-  SET_ACTIVE_LEAF:      'SET_ACTIVE_LEAF',
-  STREAMING_START:      'STREAMING_START',
-  STREAMING_CHUNK:      'STREAMING_CHUNK',
-  STREAMING_DONE:       'STREAMING_DONE',
-  STREAMING_ERROR:      'STREAMING_ERROR',
-  RESET_CONVERSATION:   'RESET_CONVERSATION',
-  SET_CONV_ID:          'SET_CONV_ID',
-  LOAD_CONVERSATION:    'LOAD_CONVERSATION',
-  ADD_SESSION_TOKENS:   'ADD_SESSION_TOKENS',
+  SET_PROVIDER_KEYS:      'SET_PROVIDER_KEYS',
+  SET_KEY_MODE:           'SET_KEY_MODE',
+  SET_MODEL:              'SET_MODEL',
+  ADD_NODE:               'ADD_NODE',
+  SET_ACTIVE_LEAF:        'SET_ACTIVE_LEAF',
+  STREAMING_START:        'STREAMING_START',
+  STREAMING_CHUNK:        'STREAMING_CHUNK',
+  STREAMING_DONE:         'STREAMING_DONE',
+  STREAMING_ERROR:        'STREAMING_ERROR',
+  RESET_CONVERSATION:     'RESET_CONVERSATION',
+  SET_CONV_ID:            'SET_CONV_ID',
+  LOAD_CONVERSATION:      'LOAD_CONVERSATION',
+  ADD_SESSION_TOKENS:     'ADD_SESSION_TOKENS',
+  ADD_SELECTION_BRANCH:   'ADD_SELECTION_BRANCH',
 };
 
 const initialState = {
@@ -235,6 +263,22 @@ function reducer(state, action) {
         streamingContent: '',
         error: action.payload,
       };
+
+    case ACTIONS.ADD_SELECTION_BRANCH: {
+      const { nodeId, branch } = action.payload;
+      const target = state.nodes[nodeId];
+      if (!target) return state;
+      return {
+        ...state,
+        nodes: {
+          ...state.nodes,
+          [nodeId]: {
+            ...target,
+            selectionBranches: [...(target.selectionBranches || []), branch],
+          },
+        },
+      };
+    }
 
     case ACTIONS.RESET_CONVERSATION:
       return {
@@ -459,9 +503,103 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.activeLeafId, state.isStreaming, state.nodes, state.anthropicApiKey, state.openaiApiKey, state.model, state.keyMode, state.firestoreConvId, currentUser, isAtTokenLimit, tokenLimit, addTokenUsage, onRequireSignup]);
 
+  /**
+   * Branch from an assistant node using a text selection as context.
+   * Creates a new user+assistant turn as a child of `assistantNodeId`,
+   * and records the selection highlight on that node so MessageBubble
+   * can render a clickable mark.
+   */
+  const branchAndSend = useCallback(async (assistantNodeId, content, selectionText) => {
+    if (!content?.trim() || state.isStreaming) return;
+
+    if (isAtTokenLimit && state.keyMode !== 'api-keys') {
+      dispatch({
+        type: ACTIONS.STREAMING_ERROR,
+        payload: `You've reached your monthly limit of ${tokenLimit.toLocaleString()} tokens on Grove credits. ${formatTokenLimitResetHint()} Use your own API key in settings to keep chatting, or wait until your allowance renews.`,
+      });
+      return;
+    }
+
+    const isLoggedIn = !!currentUser;
+    const guestHasKey =
+      hasAnthropicAccess({ isLoggedIn: false, anthropicApiKey: state.anthropicApiKey, keyMode: state.keyMode }) ||
+      hasOpenaiAccess({ isLoggedIn: false, openaiApiKey: state.openaiApiKey, keyMode: state.keyMode });
+    if (!isLoggedIn && !guestHasKey) {
+      onRequireSignup?.();
+      return;
+    }
+
+    const parentId = assistantNodeId;
+    const modelDef = MODELS.find((m) => m.id === state.model) || MODELS[0];
+    const provider = modelDef.provider;
+
+    const userNode = makeNode({ parentId, role: 'user', content: content.trim(), images: [], selectionQuote: selectionText });
+    dispatch({ type: ACTIONS.ADD_NODE, payload: { node: userNode, parentId } });
+
+    dispatch({
+      type: ACTIONS.ADD_SELECTION_BRANCH,
+      payload: {
+        nodeId: assistantNodeId,
+        branch: { id: nanoid(8), text: selectionText, childNodeId: userNode.id },
+      },
+    });
+
+    const convId = await ensureConversation(content.trim());
+    await saveMessageToFirestore(convId, userNode);
+
+    const historyPath = getPath(state.nodes, parentId);
+    const messages = [
+      ...pathToMessages(historyPath, provider),
+      { role: 'user', content: withSelectionQuote(content.trim(), selectionText) },
+    ];
+
+    const assistantNode = makeNode({ parentId: userNode.id, role: 'assistant', content: '', model: state.model });
+    dispatch({ type: ACTIONS.ADD_NODE, payload: { node: assistantNode, parentId: userNode.id } });
+    dispatch({ type: ACTIONS.STREAMING_START, payload: { streamingNodeId: assistantNode.id } });
+
+    const anthropicKey = effectiveAnthropicKey({ isLoggedIn, anthropicApiKey: state.anthropicApiKey, keyMode: state.keyMode });
+    const openaiKey = effectiveOpenaiKey({ isLoggedIn, openaiApiKey: state.openaiApiKey, keyMode: state.keyMode });
+
+    let accumulated = '';
+    const streamFn = provider === 'openai' ? streamOpenAIMessage : streamMessage;
+    const streamParams = provider === 'openai'
+      ? { apiKey: openaiKey, model: state.model, messages }
+      : { apiKey: anthropicKey, model: state.model, messages };
+
+    const { abort } = await streamFn({
+      ...streamParams,
+      onChunk: (chunk) => {
+        accumulated += chunk;
+        dispatch({ type: ACTIONS.STREAMING_CHUNK, payload: chunk });
+      },
+      onDone: async (usage = {}) => {
+        dispatch({ type: ACTIONS.STREAMING_DONE, payload: { id: assistantNode.id, content: accumulated } });
+        const { content: cleanContent } = splitTopicFromContent(accumulated);
+        await saveMessageToFirestore(convId, { ...assistantNode, content: cleanContent });
+        const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+        if (state.keyMode === 'api-keys') {
+          if (totalTokens > 0) dispatch({ type: ACTIONS.ADD_SESSION_TOKENS, payload: totalTokens });
+        } else if (currentUser && totalTokens > 0 && addTokenUsage) {
+          await addTokenUsage(totalTokens);
+        }
+      },
+      onError: (err) => {
+        dispatch({ type: ACTIONS.STREAMING_ERROR, payload: err.message || String(err) });
+      },
+    });
+
+    abortRef.current = abort;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.isStreaming, state.nodes, state.anthropicApiKey, state.openaiApiKey, state.model, state.keyMode, state.firestoreConvId, currentUser, isAtTokenLimit, tokenLimit, addTokenUsage, onRequireSignup]);
+
   const branchFrom = useCallback((nodeId) => {
     dispatch({ type: ACTIONS.SET_ACTIVE_LEAF, payload: nodeId });
   }, []);
+
+  const navigateToBranchFrom = useCallback((childNodeId) => {
+    const leafId = deepestLeaf(state.nodes, childNodeId);
+    dispatch({ type: ACTIONS.SET_ACTIVE_LEAF, payload: leafId });
+  }, [state.nodes]);
 
   const switchToBranch = useCallback((leafId) => {
     dispatch({ type: ACTIONS.SET_ACTIVE_LEAF, payload: leafId });
@@ -509,15 +647,16 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     snap.forEach((d) => {
       const data = d.data();
       nodes[data.id] = {
-        id:         data.id,
-        parentId:   data.parentId ?? null,
-        role:       data.role,
-        content:    data.content,
-        model:      data.model ?? null,
-        topicLabel: data.topicLabel ?? undefined,
-        timestamp:  data.timestamp,
-        children:   [],
-        branchLabel: branchLabel(data.content || ''),
+        id:              data.id,
+        parentId:        data.parentId ?? null,
+        role:            data.role,
+        content:         data.content,
+        model:           data.model ?? null,
+        topicLabel:      data.topicLabel ?? undefined,
+        selectionQuote:  data.selectionQuote ?? null,
+        timestamp:       data.timestamp,
+        children:        [],
+        branchLabel:     branchLabel(data.content || ''),
       };
     });
 
@@ -555,7 +694,9 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     setKeyMode,
     setModel,
     sendMessage,
+    branchAndSend,
     branchFrom,
+    navigateToBranchFrom,
     switchToBranch,
     abortStreaming,
     resetConversation,
@@ -575,4 +716,4 @@ export function useConversation() {
   return ctx;
 }
 
-export { getPath };
+export { getPath, deepestLeaf };
