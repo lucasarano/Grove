@@ -584,7 +584,12 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     const convId = await ensureConversation(content.trim());
     await saveMessageToFirestore(convId, userNode);
 
-    const historyPath = getPath(state.nodes, parentId);
+    // When branching from the leaf, parentId is the grandparent (for tree
+    // structure) but the model needs the full conversation up to the node
+    // the user actually highlighted, otherwise it has no context for the
+    // selected excerpt.
+    const contextNodeId = highlightNodeId ?? parentId;
+    const historyPath = getPath(state.nodes, contextNodeId);
     const messages = [
       ...pathToMessages(historyPath, provider),
       { role: 'user', content: withSelectionQuote(content.trim(), selectionText) },
