@@ -137,31 +137,15 @@ function excerptWindowAroundSelection(plain, quote, radius = 220) {
   return slice;
 }
 
-/**
- * User message for highlight-to-branch: anchor the excerpt in the assistant's
- * prior reply and optionally include surrounding text from that reply.
- */
-function withSelectionQuote(text, selectionQuote, sourceAssistantPlain = null) {
-  if (!selectionQuote) return text || '';
-  let ref =
-    'Context for that earlier follow-up:\n' +
-    `Referenced text: """${selectionQuote}"""`;
-  const win = sourceAssistantPlain
-    ? excerptWindowAroundSelection(sourceAssistantPlain, selectionQuote)
-    : null;
-  if (win) {
-    ref += `\nNearby context:\n${win}`;
-  }
-  return text ? `${text}\n\n${ref}` : ref;
-}
-
 function selectionSystemPrompt(selectionQuote, sourceAssistantPlain = null) {
   if (!selectionQuote) return null;
   let prompt =
-    'Private context for this turn: the user is asking about the referenced text below. ' +
+    'Private context for this turn: the CURRENT referenced excerpt below is the primary subject of the user message. ' +
+    'It overrides older conversation history, previous branch prompts, and any older referenced text. ' +
     'If their message says "this", "that", "it", or asks what something is, treat it as referring to the referenced text. ' +
-    'If the referenced text is only part of a word or phrase, infer the complete concept from nearby context. ' +
-    'Answer directly about that concept. Do not say you lack context when nearby context is present. ' +
+    'If the referenced text is a complete word or phrase, answer about that exact word or phrase. ' +
+    'If it is only part of a word or phrase, infer the complete concept from nearby context. ' +
+    'Answer directly about that concept. Do not ask what the user means, list alternatives from history, or say you lack context when nearby context is present. ' +
     'Do not mention highlights, selections, snippets, excerpts, or your previous response unless the user explicitly asks.\n' +
     `Referenced excerpt: """${selectionQuote}"""`;
   const win = sourceAssistantPlain
@@ -186,9 +170,6 @@ function nodeTextForSummary(node) {
   const parts = [];
   const text = compactContextText(baseText);
   if (text) parts.push(text);
-  if (node.selectionQuote) {
-    parts.push(`Referenced: "${compactContextText(node.selectionQuote, 120)}"`);
-  }
   if (node.images?.length) {
     parts.push(`[${node.images.length} image${node.images.length === 1 ? '' : 's'} attached]`);
   }
@@ -257,14 +238,15 @@ function contextPayloadFromPath(path, provider) {
 /**
  * Convert path to messages array for a given provider.
  * When a node has images, build a multimodal content array.
- * When a node has selectionQuote, prepend it as a blockquote.
+ * Historical selection context is intentionally omitted here; only the current
+ * turn's selected text is sent as a private system instruction.
  */
 function pathToMessages(path, provider = 'anthropic') {
   return path.map((n) => {
     const text =
       n.role === 'assistant'
         ? assistantPlainTextForModel(n.content)
-        : withSelectionQuote(n.content, n.selectionQuote);
+        : n.content;
     if (n.images && n.images.length > 0) {
       if (provider === 'openai') {
         return {
