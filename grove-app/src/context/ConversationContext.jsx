@@ -227,6 +227,10 @@ function joinSystemPrompts(...parts) {
   return joined || null;
 }
 
+function resolveModelDef(model) {
+  return MODELS.find((m) => m.id === model) || MODELS[0];
+}
+
 function contextPayloadFromPath(path, provider) {
   const { olderPath, recentPath } = splitPathForRecentTurns(path);
   return {
@@ -424,7 +428,7 @@ function reducer(state, action) {
         anthropicApiKey: state.anthropicApiKey,
         openaiApiKey: state.openaiApiKey,
         keyMode: state.keyMode,
-        model: state.model,
+        model: resolveModelDef(state.model).id,
         sessionTokensUsed: 0,
       };
 
@@ -438,7 +442,7 @@ function reducer(state, action) {
         anthropicApiKey: state.anthropicApiKey,
         openaiApiKey: state.openaiApiKey,
         keyMode: state.keyMode,
-        model: state.model,
+        model: resolveModelDef(state.model).id,
         sessionTokensUsed: 0,
         nodes,
         rootId,
@@ -468,7 +472,7 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
 
   // ── Firestore helpers ────────────────────────────────────────────────
 
-  async function ensureConversation(firstMessage) {
+  async function ensureConversation(firstMessage, modelId = resolveModelDef(state.model).id) {
     if (!currentUser) return null;
 
     let convId = state.firestoreConvId;
@@ -478,7 +482,7 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
         title:     firstMessage.slice(0, 60),
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        model:     state.model,
+        model:     modelId,
       });
       convId = convDoc.id;
       dispatch({ type: ACTIONS.SET_CONV_ID, payload: convId });
@@ -516,7 +520,7 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
   }, []);
 
   const setModel = useCallback((model) => {
-    dispatch({ type: ACTIONS.SET_MODEL, payload: model });
+    dispatch({ type: ACTIONS.SET_MODEL, payload: resolveModelDef(model).id });
   }, []);
 
   /**
@@ -551,7 +555,8 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
 
     const parentId = fromNodeId ?? state.activeLeafId;
     const preserveActiveLeaf = !!fromNodeId;
-    const modelDef = MODELS.find((m) => m.id === state.model) || MODELS[0];
+    const modelDef = resolveModelDef(state.model);
+    const modelId = modelDef.id;
     const provider = modelDef.provider;
 
     // Strip previewUrl before storing (too large and not needed beyond the current session)
@@ -573,7 +578,7 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     }
 
     // 2. Persist to Firestore if logged in (images omitted — base64 data too large)
-    const convId = await ensureConversation(content.trim() || '(image)');
+    const convId = await ensureConversation(content.trim() || '(image)', modelId);
     await saveMessageToFirestore(convId, userNode);
 
     // 3. Build conversation context with provider-specific multimodal format
@@ -615,7 +620,7 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     const turnSystemPrompt = joinSystemPrompts(contextPayload.systemPrompt, selectionPrompt);
 
     // 4. Create placeholder streaming node (assistant)
-    const assistantNode = makeNode({ parentId: userNode.id, role: 'assistant', content: '', model: state.model });
+    const assistantNode = makeNode({ parentId: userNode.id, role: 'assistant', content: '', model: modelId });
     dispatch({ type: ACTIONS.ADD_NODE, payload: { node: assistantNode, parentId: userNode.id, preserveActiveLeaf } });
     onNodeCreated?.(assistantNode.id);
     dispatch({ type: ACTIONS.STREAMING_START, payload: { streamingNodeId: assistantNode.id } });
@@ -638,8 +643,8 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
       : streamMessage;
 
     const streamParams = provider === 'openai'
-      ? { apiKey: openaiKey, model: state.model, messages, systemPrompt: turnSystemPrompt }
-      : { apiKey: anthropicKey, model: state.model, messages, systemPrompt: turnSystemPrompt };
+      ? { apiKey: openaiKey, model: modelId, messages, systemPrompt: turnSystemPrompt }
+      : { apiKey: anthropicKey, model: modelId, messages, systemPrompt: turnSystemPrompt };
 
     const { abort } = await streamFn({
       ...streamParams,
@@ -714,7 +719,8 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     }
 
     const parentId = assistantNodeId;
-    const modelDef = MODELS.find((m) => m.id === state.model) || MODELS[0];
+    const modelDef = resolveModelDef(state.model);
+    const modelId = modelDef.id;
     const provider = modelDef.provider;
 
     const userNode = makeNode({
@@ -736,7 +742,7 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
       },
     });
 
-    const convId = await ensureConversation(content.trim());
+    const convId = await ensureConversation(content.trim(), modelId);
     await saveMessageToFirestore(convId, userNode);
 
     // When branching from the leaf, parentId is the grandparent (for tree
@@ -764,7 +770,7 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
       selectionSystemPrompt(selectionText, sourceAssistantPlain),
     );
 
-    const assistantNode = makeNode({ parentId: userNode.id, role: 'assistant', content: '', model: state.model });
+    const assistantNode = makeNode({ parentId: userNode.id, role: 'assistant', content: '', model: modelId });
     dispatch({ type: ACTIONS.ADD_NODE, payload: { node: assistantNode, parentId: userNode.id, preserveActiveLeaf } });
     onNodeCreated?.(assistantNode.id);
     dispatch({ type: ACTIONS.STREAMING_START, payload: { streamingNodeId: assistantNode.id } });
@@ -775,8 +781,8 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     let accumulated = '';
     const streamFn = provider === 'openai' ? streamOpenAIMessage : streamMessage;
     const streamParams = provider === 'openai'
-      ? { apiKey: openaiKey, model: state.model, messages, systemPrompt: turnSystemPrompt }
-      : { apiKey: anthropicKey, model: state.model, messages, systemPrompt: turnSystemPrompt };
+      ? { apiKey: openaiKey, model: modelId, messages, systemPrompt: turnSystemPrompt }
+      : { apiKey: anthropicKey, model: modelId, messages, systemPrompt: turnSystemPrompt };
 
     const { abort } = await streamFn({
       ...streamParams,
@@ -895,7 +901,7 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     streamingNodeId: state.streamingNodeId,
     streamingContent: state.streamingContent,
     isStreaming: state.isStreaming,
-    model: state.model,
+    model: resolveModelDef(state.model).id,
     anthropicApiKey: state.anthropicApiKey,
     openaiApiKey: state.openaiApiKey,
     keyMode: state.keyMode,

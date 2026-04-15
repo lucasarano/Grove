@@ -147,7 +147,7 @@ export default function AuthModal({ open, onClose, defaultMode = 'signup' }) {
         </h2>
         <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9375rem', fontWeight: 300, marginBottom: '1.75rem' }}>
           {mode === 'signup'
-            ? 'Sign up and get free credits for Haiku, Sonnet & GPT 5.2 Mini.'
+            ? 'Sign up and get free credits for Claude Haiku 4.5 & GPT 5.4 Mini.'
             : 'Sign in to access your conversations and free credits.'}
         </p>
 

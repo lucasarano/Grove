@@ -13,10 +13,10 @@ function getClient(apiKey) {
 //       'blocked' = premium only (shown but disabled for free users)
 const MODELS = [
   { id: 'claude-haiku-4-5',  label: 'Claude Haiku 4.5',  provider: 'anthropic', tier: 'free'    },
-  { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', provider: 'anthropic', tier: 'free'    },
-  { id: 'gpt-4.1-mini',      label: 'GPT 5.2 Mini',      provider: 'openai',    tier: 'free'    },
+  { id: 'gpt-5.4-mini',      label: 'GPT 5.4 Mini',      provider: 'openai',    tier: 'free'    },
+  { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5', provider: 'anthropic', tier: 'blocked' },
   { id: 'claude-opus-4-5',   label: 'Claude Opus 4.5',   provider: 'anthropic', tier: 'blocked' },
-  { id: 'gpt-4.1',           label: 'GPT 5.4',           provider: 'openai',    tier: 'blocked' },
+  { id: 'gpt-5.4',           label: 'GPT 5.4',           provider: 'openai',    tier: 'blocked' },
 ];
 
 const DEFAULT_MODEL = MODELS[0].id;

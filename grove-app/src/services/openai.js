@@ -32,7 +32,7 @@ async function streamOpenAIMessage({ apiKey, model, messages, systemPrompt, onCh
     const stream = await client.chat.completions.create(
       {
         model,
-        max_tokens: 4096,
+        max_completion_tokens: 4096,
         messages: [
           { role: 'system', content: composeSystemPrompt(systemPrompt) },
           ...messages.map((m) => ({ role: m.role, content: m.content })),

@@ -281,7 +281,7 @@ export default function Header({ onShowAuth, onToggleSidebar, onShowUpgrade, onS
                     onMouseEnter={(e) => { if (!locked && !selected) e.currentTarget.style.background = 'var(--color-bg)'; }}
                     onMouseLeave={(e) => { if (!locked && !selected) e.currentTarget.style.background = 'transparent'; }}
                   >
-                    <span style={{ flexShrink: 0 }}>{m.label}</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{m.label}</span>
                     {m.tier === 'blocked' && !isPremium && (
                       <button
                         type="button"
@@ -307,7 +307,25 @@ export default function Header({ onShowAuth, onToggleSidebar, onShowUpgrade, onS
                         Premium
                       </span>
                     )}
-                    {!isBlocked(m) && noKey && (
+                    {!isBlocked(m) && noKey && !isLoggedIn && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setModelOpen(false); onShowAuth?.(); }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '0.25rem',
+                          fontSize: '0.75rem', color: 'var(--color-text-secondary)',
+                          flexShrink: 0,
+                          background: 'var(--color-bg-alt)',
+                          border: 'none',
+                          cursor: 'pointer', padding: '0.125rem 0.375rem',
+                          fontFamily: 'var(--font-body)', fontWeight: 500,
+                          letterSpacing: '0.05em', textTransform: 'uppercase',
+                        }}
+                      >
+                        Sign in
+                      </button>
+                    )}
+                    {!isBlocked(m) && noKey && isLoggedIn && (
                       <span style={{ fontSize: '0.75rem', fontWeight: 400, color: 'var(--color-text-tertiary)', flexShrink: 0 }}>
                         No API Key
                       </span>

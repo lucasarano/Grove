@@ -56,7 +56,7 @@ async function ensureUserDoc(user) {
       email:       user.email,
       displayName: user.displayName || '',
       createdAt:   serverTimestamp(),
-      credits:     { haiku: 50, sonnet: 20, gptMini: 20 },
+      credits:     { haiku: 50, gptMini: 20 },
       tokensUsed:  0,
       tokenUsageMonth: month,
     });
