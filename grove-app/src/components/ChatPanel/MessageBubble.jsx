@@ -288,17 +288,18 @@ function wrapTextInElement(root, searchText, branchId, onClick) {
   while ((cur = walker.nextNode())) textNodes.push(cur);
   if (!textNodes.length) return;
 
-  // Build a concatenated view of all visible text to locate the match.
-  // Normalize whitespace so selections that span block boundaries (where the
-  // browser adds \n) still match the DOM's plain text content.
+  // Build a concatenated view of all visible text nodes to locate the match.
+  // We intentionally do NOT normalise whitespace here: normalisation changes
+  // character counts so positions derived from the normalised string no longer
+  // correspond to offsets in the original text nodes, which would corrupt the
+  // text when we split them.  Cross-paragraph selections (where the browser
+  // adds a '\n' in sel.toString() that doesn't exist in any DOM text node) will
+  // simply produce no match and no mark — a safe no-op.
   const combined = textNodes.map((n) => n.nodeValue).join('');
-  const normalizedCombined = combined.replace(/\s+/g, ' ');
-  const normalizedSearch = searchText.replace(/\s+/g, ' ').trim();
-
-  const idx = normalizedCombined.indexOf(normalizedSearch);
+  const idx = combined.indexOf(searchText);
   if (idx === -1) return;
 
-  const endIdx = idx + normalizedSearch.length;
+  const endIdx = idx + searchText.length;
 
   // Map the match position back to individual text nodes.
   let pos = 0;
