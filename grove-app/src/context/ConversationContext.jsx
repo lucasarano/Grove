@@ -96,14 +96,13 @@ function getPath(nodes, leafId) {
 
 /**
  * Append the highlighted excerpt to the user's message as a plain
- * parenthetical.  An earlier "System context — do not acknowledge" framing
- * caused smaller models (e.g. Haiku) to interpret the instruction as
- * "pretend you have no context" and respond with "I don't see any highlighted
- * text."  A simple, natural parenthetical is clearer and more reliable.
+ * parenthetical.  Explicitly identifying the excerpt as coming from the
+ * model's own previous response prevents smaller models from trying to
+ * interpret a potentially incomplete fragment as an unknown external phrase.
  */
 function withSelectionQuote(text, selectionQuote) {
   if (!selectionQuote) return text || '';
-  const ref = `(Referring to: "${selectionQuote}")`;
+  const ref = `(I highlighted this excerpt from your previous response: "${selectionQuote}")`;
   return text ? `${text}\n\n${ref}` : ref;
 }
 
