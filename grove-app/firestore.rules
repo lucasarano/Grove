@@ -1,17 +1,52 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Users can only read/write their own data
+    function isSignedInUser(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function allowedUserCreateKeys() {
+      return [
+        'uid',
+        'email',
+        'displayName',
+        'createdAt',
+        'credits',
+        'tokensUsed',
+        'tokenUsageMonth'
+      ];
+    }
+
+    function allowedUserUpdateKeys() {
+      return [
+        'email',
+        'displayName'
+      ];
+    }
+
+    function isValidInitialUserDoc(userId) {
+      return request.resource.data.keys().hasOnly(allowedUserCreateKeys())
+        && request.resource.data.uid == userId
+        && request.resource.data.tokensUsed == 0
+        && request.resource.data.tokenUsageMonth is string
+        && (!('credits' in request.resource.data)
+          || request.resource.data.credits == { 'haiku': 50, 'gptMini': 20 });
+    }
+
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if isSignedInUser(userId);
+      allow create: if isSignedInUser(userId) && isValidInitialUserDoc(userId);
+      allow update: if isSignedInUser(userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(allowedUserUpdateKeys());
+      allow delete: if false;
       
       // Conversations subcollection
       match /conversations/{conversationId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+        allow read, write: if isSignedInUser(userId);
         
         // Messages subcollection
         match /messages/{messageId} {
-          allow read, write: if request.auth != null && request.auth.uid == userId;
+          allow read, write: if isSignedInUser(userId);
         }
       }
     }

@@ -19,28 +19,27 @@ export function saveKeyMode(mode) {
 
 /**
  * Resolve which API keys are actually used for requests.
- * When keyMode === 'api-keys' logged-in users bypass the env key and use their own.
+ * Grove credits use Firebase Functions secrets, so no shared provider key is
+ * returned to the browser. BYOK mode still uses the user's local key directly.
  */
 export function effectiveAnthropicKey({ isLoggedIn, anthropicApiKey, keyMode = 'credits' }) {
-  const env = (import.meta.env.VITE_ANTHROPIC_API_KEY || '').trim();
   const local = (anthropicApiKey || '').trim();
-  if (isLoggedIn && keyMode === 'credits') return env || local;
+  if (isLoggedIn && keyMode === 'credits') return '';
   return local;
 }
 
 export function effectiveOpenaiKey({ isLoggedIn, openaiApiKey, keyMode = 'credits' }) {
-  const env = (import.meta.env.VITE_OPENAI_API_KEY || '').trim();
   const local = (openaiApiKey || '').trim();
-  if (isLoggedIn && keyMode === 'credits') return env || local;
+  if (isLoggedIn && keyMode === 'credits') return '';
   return local;
 }
 
 export function hasAnthropicAccess(ctx) {
-  return !!effectiveAnthropicKey(ctx);
+  return (ctx.isLoggedIn && (ctx.keyMode ?? 'credits') === 'credits') || !!effectiveAnthropicKey(ctx);
 }
 
 export function hasOpenaiAccess(ctx) {
-  return !!effectiveOpenaiKey(ctx);
+  return (ctx.isLoggedIn && (ctx.keyMode ?? 'credits') === 'credits') || !!effectiveOpenaiKey(ctx);
 }
 
 export function guestHasAnyProviderKey() {

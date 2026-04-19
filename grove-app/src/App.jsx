@@ -334,7 +334,7 @@ function CheckoutBanner({ status, onDismiss }) {
 }
 
 function AppInner() {
-  const { user, loading, isAtTokenLimit, addTokenUsage } = useAuth();
+  const { user, isAtTokenLimit, addTokenUsage } = useAuth();
   const [authOpen,      setAuthOpen]      = useState(false);
   const [authModalMode, setAuthModalMode] = useState('signup');
   const [upgradeOpen,   setUpgradeOpen]   = useState(false);

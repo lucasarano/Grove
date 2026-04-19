@@ -645,6 +645,7 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     const streamParams = provider === 'openai'
       ? { apiKey: openaiKey, model: modelId, messages, systemPrompt: turnSystemPrompt }
       : { apiKey: anthropicKey, model: modelId, messages, systemPrompt: turnSystemPrompt };
+    const usageRecordedByServer = isLoggedIn && state.keyMode === 'credits';
 
     const { abort } = await streamFn({
       ...streamParams,
@@ -667,7 +668,7 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
           if (totalTokens > 0) {
             dispatch({ type: ACTIONS.ADD_SESSION_TOKENS, payload: totalTokens });
           }
-        } else if (currentUser && totalTokens > 0 && addTokenUsage) {
+        } else if (!usageRecordedByServer && currentUser && totalTokens > 0 && addTokenUsage) {
           await addTokenUsage(totalTokens);
         }
       },
@@ -783,6 +784,7 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
     const streamParams = provider === 'openai'
       ? { apiKey: openaiKey, model: modelId, messages, systemPrompt: turnSystemPrompt }
       : { apiKey: anthropicKey, model: modelId, messages, systemPrompt: turnSystemPrompt };
+    const usageRecordedByServer = isLoggedIn && state.keyMode === 'credits';
 
     const { abort } = await streamFn({
       ...streamParams,
@@ -797,7 +799,7 @@ export function ConversationProvider({ children, currentUser, isAtTokenLimit, ad
         const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
         if (state.keyMode === 'api-keys') {
           if (totalTokens > 0) dispatch({ type: ACTIONS.ADD_SESSION_TOKENS, payload: totalTokens });
-        } else if (currentUser && totalTokens > 0 && addTokenUsage) {
+        } else if (!usageRecordedByServer && currentUser && totalTokens > 0 && addTokenUsage) {
           await addTokenUsage(totalTokens);
         }
       },

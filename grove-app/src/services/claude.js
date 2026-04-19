@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { TOPIC_END, TOPIC_START } from '../lib/topicMetadata.js';
+import { streamFirebaseAIMessage } from './firebaseAi.js';
 
 // We build a new client per request so the key can be changed at runtime
 function getClient(apiKey) {
@@ -65,6 +66,18 @@ function ensureAnthropicMessagesStartWithUser(messages) {
 }
 
 async function streamMessage({ apiKey, model, messages, systemPrompt, onChunk, onDone, onError }) {
+  if (!apiKey) {
+    return streamFirebaseAIMessage({
+      provider: 'anthropic',
+      model: model || DEFAULT_MODEL,
+      messages: ensureAnthropicMessagesStartWithUser(messages),
+      systemPrompt: composeSystemPrompt(systemPrompt),
+      onChunk,
+      onDone,
+      onError,
+    });
+  }
+
   const client = getClient(apiKey);
 
   const abortController = new AbortController();

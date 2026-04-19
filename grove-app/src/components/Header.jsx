@@ -6,7 +6,7 @@ import { MODELS } from '../services/claude';
 import { hasAnthropicAccess, hasOpenaiAccess } from '../lib/providerKeys';
 
 export default function Header({ onShowAuth, onToggleSidebar, onShowUpgrade, onShowPremiumManage, onShowTutorial }) {
-  const { model, setModel, resetConversation, isStreaming, anthropicApiKey, openaiApiKey } = useConversation();
+  const { model, setModel, resetConversation, isStreaming, anthropicApiKey, openaiApiKey, keyMode } = useConversation();
   const { user, isLoggedIn, isPremium, logout } = useAuth();
   const [modelOpen,   setModelOpen]   = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -31,8 +31,8 @@ export default function Header({ onShowAuth, onToggleSidebar, onShowUpgrade, onS
 
   const currentModel = MODELS.find((m) => m.id === model) || MODELS[0];
   const isBlocked = (m) => m.tier === 'blocked' && !isPremium;
-  const hasAnthropic = hasAnthropicAccess({ isLoggedIn, anthropicApiKey });
-  const hasOpenai = hasOpenaiAccess({ isLoggedIn, openaiApiKey });
+  const hasAnthropic = hasAnthropicAccess({ isLoggedIn, anthropicApiKey, keyMode });
+  const hasOpenai = hasOpenaiAccess({ isLoggedIn, openaiApiKey, keyMode });
   const missingProviderKey = (m) =>
     (m.provider === 'anthropic' && !hasAnthropic) || (m.provider === 'openai' && !hasOpenai);
 

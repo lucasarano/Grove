@@ -1,4 +1,4 @@
-import { useEffect, useRef, memo } from 'react';
+import { useEffect, useRef } from 'react';
 import MessageBubble from './MessageBubble';
 import { useConversation } from '../../context/ConversationContext';
 

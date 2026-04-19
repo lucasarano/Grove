@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, CheckCircle, Lightning, Infinity, Lock } from '@phosphor-icons/react';
+import { X, Lightning, Infinity as InfinityIcon, Lock } from '@phosphor-icons/react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
 import { FREE_TOKEN_LIMIT, PREMIUM_TOKEN_LIMIT } from '../context/AuthContext';
@@ -27,7 +27,7 @@ const PANEL = {
 };
 
 const FEATURE_ITEMS = [
-  { icon: <Infinity size={16} weight="bold" />, text: `Up to ${PREMIUM_TOKEN_LIMIT.toLocaleString()} Grove-credit tokens per month on Premium (${FREE_TOKEN_LIMIT.toLocaleString()} on free) — resets each calendar month` },
+  { icon: <InfinityIcon size={16} weight="bold" />, text: `Up to ${PREMIUM_TOKEN_LIMIT.toLocaleString()} Grove-credit tokens per month on Premium (${FREE_TOKEN_LIMIT.toLocaleString()} on free) — resets each calendar month` },
   { icon: <Lock size={16} weight="bold" />,     text: 'Claude Opus 4.5 — most powerful reasoning' },
   { icon: <Lock size={16} weight="bold" />,     text: 'GPT 5.4 — OpenAI\'s flagship model' },
   { icon: <Lightning size={16} weight="bold" />, text: 'All current and future premium models' },
@@ -127,7 +127,7 @@ export default function UpgradeModal({ open, onClose }) {
             {FEATURE_ITEMS.map(({ icon, text }, i) => (
               <li key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <span style={{ color: 'var(--color-accent)', flexShrink: 0 }}>
-                  <CheckCircle size={17} weight="fill" />
+                  {icon}
                 </span>
                 <span style={{ fontSize: '0.9375rem', fontWeight: 300, color: 'var(--color-text-primary)', lineHeight: 1.4 }}>
                   {text}

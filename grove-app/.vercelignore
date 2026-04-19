@@ -1,17 +1,9 @@
-.cursor/
-
-# Local secrets and environment files
 .env
 .env.*
 !.env.example
-**/.env
-**/.env.*
-!**/.env.example
 *.local
 .secret.local
 **/.secret.local
-
-# Credential material
 *service-account*.json
 *serviceAccount*.json
 credentials*.json

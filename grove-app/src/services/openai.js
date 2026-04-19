@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { TOPIC_END, TOPIC_START } from '../lib/topicMetadata.js';
+import { streamFirebaseAIMessage } from './firebaseAi.js';
 
 function getClient(apiKey) {
   return new OpenAI({
@@ -25,6 +26,18 @@ function composeSystemPrompt(systemPrompt) {
  * Stream an OpenAI response.
  */
 async function streamOpenAIMessage({ apiKey, model, messages, systemPrompt, onChunk, onDone, onError }) {
+  if (!apiKey) {
+    return streamFirebaseAIMessage({
+      provider: 'openai',
+      model,
+      messages,
+      systemPrompt: composeSystemPrompt(systemPrompt),
+      onChunk,
+      onDone,
+      onError,
+    });
+  }
+
   const client = getClient(apiKey);
   const abortController = new AbortController();
 

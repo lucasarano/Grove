@@ -16,7 +16,6 @@ import {
   getDoc,
   onSnapshot,
   serverTimestamp,
-  updateDoc,
   runTransaction,
 } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
@@ -60,12 +59,6 @@ async function ensureUserDoc(user) {
       tokensUsed:  0,
       tokenUsageMonth: month,
     });
-  } else {
-    const data = snap.data();
-    const patch = {};
-    if (data.tokensUsed === undefined) patch.tokensUsed = 0;
-    if (data.tokenUsageMonth === undefined) patch.tokenUsageMonth = month;
-    if (Object.keys(patch).length) await updateDoc(ref, patch);
   }
 }
 
