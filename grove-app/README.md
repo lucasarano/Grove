@@ -18,4 +18,4 @@ npm run secrets:check
 
 ## Secrets
 
-Never commit `.env`, provider API keys, Stripe secrets, webhook secrets, service-account files, or private keys. Use `.env.example` for public Firebase client config shape only, and store provider/billing secrets in Firebase Secret Manager.
+Never commit `.env`, provider API keys, service-account files, or private keys. Use `.env.example` for public Firebase client config shape only, and store provider secrets in Firebase Secret Manager.
